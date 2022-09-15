@@ -1,0 +1,10 @@
+
+{
+  "config_Filename": "Configuration_Combined_MJPFs_multiple_parameters",
+  "output_folder": "/Validation_multiple_params/",
+  "N_Particles": "150",
+  "skew_video": "0.25,0.8",
+  "resampleThresh": "0.1,0.6",
+  "firstResampleThresh": "1.5",
+  "obs": "1000"
+}

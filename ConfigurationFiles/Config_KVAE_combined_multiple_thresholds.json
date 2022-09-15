@@ -1,0 +1,9 @@
+
+{
+  "config_Filename": "Configuration_Combined_MJPFs_multiple_thresholds",
+  "output_folder": "/Validation_multiple_threshs/",
+  "stdTimes": "2.5, 3",
+  "time_window": "20",
+  "time_enough_ratio": "0.75,0.85",
+  "time_wait_ratio": "0.25, 0.1"
+}
