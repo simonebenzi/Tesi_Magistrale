@@ -14,7 +14,7 @@ AddAdditionalNecessaryPaths()
 %% Parameters to define
 % Final time instant to print
 endingPoint = -1;
-last_time_to_plot = 3500;
+last_time_to_plot = 2499;
 final_to_print = last_time_to_plot;
 dataCase = 2; % train (0), validation (1) or test (2)
 timeStepsBeforeEndForErrCalculation = 10;

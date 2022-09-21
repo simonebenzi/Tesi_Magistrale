@@ -13,7 +13,7 @@
   "observationVariance": 0.5,
   "testingOnTraining": false,
   "initialTimeInstant": 1,
-  "lastTimeInstant": -1,
+  "lastTimeInstant": 2500,
   "transitionMatExplorationPercentage": 0,
   "saveReconstructedImages": false,
   "reconstructedImagesFolder": "/On_the_fly_reconstructed_images/",

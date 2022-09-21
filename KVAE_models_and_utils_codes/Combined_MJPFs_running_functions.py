@@ -235,7 +235,7 @@ def PrepareModelsForOdometryFromVideoTestingData(config, configOfV, testingData)
     return kvaeOfV, transitionMatNumpy, transMatsTimeNumpy, nodesDistanceMatrixNumpy, windowedtransMatsTimeNumpy
 
 
-def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData):
+def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData, use_IMU):
     
     if case != 112: # if not speed calculation case
         newIndicesForSwapping_numpy_all = []
@@ -274,11 +274,18 @@ def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData):
             print('Data number ' + str(i+1) + ' out of ' + str(lenghtLoop))
             
             # Extract from data
-            currentImagesBatch, currentControlsBatch, currentOdometryBatch, currentParamsBatch = \
-               kvaeOfV.kvae.ExtractBatchInputsDataStructure4DWithoutDistances(data = testingData, 
-                                                                              currentBatchNumber = i, 
-                                                                              batchSize = config['batch_size'], 
-                                                                              image_channels = config['image_channels']) 
+            if use_IMU:
+                currentImagesBatch, currentControlsBatch, currentOdometryBatch, currentParamsBatch, currentAccBatch, currentOrientBatch = \
+                    kvaeOfV.kvae.ExtractBatchInputsDataStructure4DWithoutDistances(data = testingData, 
+                                                                                currentBatchNumber = i, 
+                                                                                batchSize = config['batch_size'], 
+                                                                                image_channels = config['image_channels'])
+            else:
+                currentImagesBatch, currentControlsBatch, currentOdometryBatch, currentParamsBatch = \
+                    kvaeOfV.kvae.ExtractBatchInputsDataStructure4DWithoutDistances(data = testingData, 
+                                                                                currentBatchNumber = i, 
+                                                                                batchSize = config['batch_size'], 
+                                                                                image_channels = config['image_channels']) 
             # If there is no color channel, add one after batch size
             if len(currentImagesBatch.shape) == 4:
                 currentImagesBatch = torch.unsqueeze(currentImagesBatch, 1)
@@ -319,15 +326,29 @@ def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData):
 
             elif case == 110:
                 
-                kvaeOfV.CombinedMJPFsVideoOdometrySingleMJPF(currentImagesBatch = currentImagesBatch,
-                                                             currentParamsBatch = currentParamsBatch,
-                                                             outputFolder = configOfV['output_folder'],
-                                                             type_of_weighting = configOfV['type_of_weighting'],
-                                                             knownStartingPoint = configOfV['known_starting_point'], 
-                                                             saveReconstructedImages = configOfV['saveReconstructedImages'],
-                                                             reconstructedImagesFolder = configOfV['reconstructedImagesFolder'],
-                                                             fastDistanceCalculation = configOfV['fastDistanceCalculation'],
-                                                             percentageParticlesToReinitialize = configOfV['percentageParticlesToReinitialize'])
+                # Different implementation using IMU or not
+                if not use_IMU:
+                    kvaeOfV.CombinedMJPFsVideoOdometrySingleMJPF(currentImagesBatch = currentImagesBatch,
+                        currentParamsBatch = currentParamsBatch,
+                        outputFolder = configOfV['output_folder'],
+                        type_of_weighting = configOfV['type_of_weighting'],
+                        knownStartingPoint = configOfV['known_starting_point'], 
+                        saveReconstructedImages = configOfV['saveReconstructedImages'],
+                        reconstructedImagesFolder = configOfV['reconstructedImagesFolder'],
+                        fastDistanceCalculation = configOfV['fastDistanceCalculation'],
+                        percentageParticlesToReinitialize = configOfV['percentageParticlesToReinitialize'])
+                else:
+                    kvaeOfV.CombinedMJPFsVideoOdometrySingleMJPFWithIMU(currentImagesBatch = currentImagesBatch,
+                        currentParamsBatch = currentParamsBatch,
+                        currentAccBatch = currentAccBatch,
+                        currentOrientBatch = currentOrientBatch,
+                        outputFolder = configOfV['output_folder'],
+                        type_of_weighting = configOfV['type_of_weighting'],
+                        knownStartingPoint = configOfV['known_starting_point'], 
+                        saveReconstructedImages = configOfV['saveReconstructedImages'],
+                        reconstructedImagesFolder = configOfV['reconstructedImagesFolder'],
+                        fastDistanceCalculation = configOfV['fastDistanceCalculation'],
+                        percentageParticlesToReinitialize = configOfV['percentageParticlesToReinitialize'])
                 
                 SaveOutputToMATLABGivenDebugCode(kvaeOfV.updatedValuesFromDMatrices.clone(), allPredictedParams_numpy_all, 
                                                  configOfV['output_folder'], 'predictedParams', case)
@@ -361,15 +382,15 @@ def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData):
                 sio.savemat(configOfV['output_folder'] + '/OD_whyRestarted_numpy_debugCode110' + '.mat', 
                             {'whyRestarted':whyRestarted_numpy})
                  
-                newIndicesForSwapping_numpy = kvaeOfV.newIndicesForSwapping
-                newIndicesForSwapping_numpy_all.append(newIndicesForSwapping_numpy)
-                sio.savemat(configOfV['output_folder'] + '/OD_newIndicesForSwapping_numpy_debugCode110' + '.mat', 
-                            {'newIndicesForSwapping':newIndicesForSwapping_numpy_all})
+                #newIndicesForSwapping_numpy = kvaeOfV.newIndicesForSwapping
+                #newIndicesForSwapping_numpy_all.append(newIndicesForSwapping_numpy)
+                #sio.savemat(configOfV['output_folder'] + '/OD_newIndicesForSwapping_numpy_debugCode110' + '.mat', 
+                            #{'newIndicesForSwapping':newIndicesForSwapping_numpy_all})
                 
-                indicesRestartedParticles_numpy = kvaeOfV.indicesRestartedParticles
-                indicesRestartedParticles_numpy_all.append(indicesRestartedParticles_numpy)
-                sio.savemat(configOfV['output_folder'] + '/OD_indicesRestartedParticles_numpy_debugCode110' + '.mat', 
-                            {'indicesRestartedParticles':indicesRestartedParticles_numpy_all})
+                #indicesRestartedParticles_numpy = kvaeOfV.indicesRestartedParticles
+                #indicesRestartedParticles_numpy_all.append(indicesRestartedParticles_numpy)
+                #sio.savemat(configOfV['output_folder'] + '/OD_indicesRestartedParticles_numpy_debugCode110' + '.mat', 
+                            #{'indicesRestartedParticles':indicesRestartedParticles_numpy_all})
 
                 ###################################################################
                 # ANOMALIES

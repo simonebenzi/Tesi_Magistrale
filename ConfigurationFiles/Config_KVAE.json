@@ -44,9 +44,9 @@
   "deleteThreshClusterSmoothing": 3,
   "minFile": "/train_positions/train_positions_min.mat",
   "maxFile": "/train_positions/train_positions_max.mat",
-  "training_data_file": "/InputsToFinalModel/train_data_file",
-  "validation_data_file": "/InputsToFinalModel/validation_data_file",
-  "testing_data_file": "/InputsToFinalModel/test_data_file",
+  "training_data_file": "/InputsToFinalModel_NoShadow/train_data_file",
+  "validation_data_file": "/InputsToFinalModel_NoShadow/validation_data_file",
+  "testing_data_file": "/InputsToFinalModel_NoShadow/test_data_file",
   "clustering_data_file": "/Vocabulary_odometry.mat",
   "output_folder": "/trained_KVAE/"
 }

@@ -62,6 +62,11 @@ class DataHolder(object):
                                     (self.odometry.shape[0]*self.odometry.shape[1], self.odometry.shape[2]))
             self.params   = np.reshape(self.params, 
                                     (self.params.shape[0]*self.params.shape[1], self.params.shape[2]))
+            if hasattr(self, 'acceleration') and hasattr(self, 'orientation'):
+                self.acceleration   = np.reshape(self.acceleration, 
+                                    (self.acceleration.shape[0]*self.acceleration.shape[1], self.acceleration.shape[2]))
+                self.orientation   = np.reshape(self.orientation, 
+                                    (self.orientation.shape[0]*self.orientation.shape[1], self.orientation.shape[2]))
         
         if type(self.images)   == np.ndarray and image_channels == 1: # If numpy
             self.images   = np.reshape(self.images, 
@@ -84,6 +89,13 @@ class DataHolder(object):
             self.params   = torch.squeeze(self.params, dim = 0)
             self.params   = torch.reshape(self.params, 
                                     (self.params.shape[0]*self.params.shape[1], self.params.shape[2]))
+            if hasattr(self, 'acceleration') and hasattr(self, 'orientation'):
+                self.acceleration   = torch.squeeze(self.acceleration, dim = 0)
+                self.acceleration   = torch.reshape(self.acceleration, 
+                                    (self.acceleration.shape[0]*self.acceleration.shape[1], self.acceleration.shape[2]))
+                self.orientation   = torch.squeeze(self.orientation, dim = 0)
+                self.orientation   = torch.reshape(self.orientation, 
+                                    (self.orientation.shape[0]*self.orientation.shape[1], self.orientation.shape[2]))
         
         self.images = torch.squeeze(self.images, dim = 0)
         
@@ -159,6 +171,14 @@ class DataHolder(object):
         self.images    = data['images']    # images
         self.controls  = data['controls']  # controls (=u)
         self.odometry  = data['odometry']  # odometry (could correspond to control)
+        print('self odometry size {}'.format(self.odometry.shape))
+        print('image channels {}'.format(image_channels))
+
+        if 'acceleration' in data.keys():
+            self.acceleration  = data['acceleration']  # linear acceleration 
+        if 'orientation' in data.keys():
+            self.orientation  = data['orientation']  # angular velocity 
+            print('self orientation size {}'.format(self.orientation.shape))
         
         if data['images'].ndim  == 5 and image_channels == 1 and trajectory_to_select != None: # If this was saved as DataHolderLongSequences, just pick the first trajectory
             print('Dimension = 5, taking trajectory number ' + str(trajectory_to_select))
@@ -166,6 +186,10 @@ class DataHolder(object):
             self.images   = self.images[trajectory_to_select,:,:,:,:]
             self.controls = self.controls[trajectory_to_select,:,:,:]
             self.odometry = self.odometry[trajectory_to_select,:,:,:]
+            if 'acceleration' in data.keys():
+                self.acceleration = self.acceleration[trajectory_to_select,:,:,:]
+            if 'orientation' in data.keys():
+                self.orientation = self.orientation[trajectory_to_select,:,:,:]
         elif data['images'].ndim  == 5 and image_channels == 1 and trajectory_to_select == None:  
             print('Dimension = 5, taking all trajectories')
             
@@ -178,6 +202,15 @@ class DataHolder(object):
             self.odometry = np.reshape(self.odometry, 
                                       (self.odometry.shape[0]*self.odometry.shape[1],
                                        self.odometry.shape[2],self.odometry.shape[3]))
+            
+            if 'acceleration' in data.keys():
+                self.acceleration = np.reshape(self.acceleration, 
+                                      (self.acceleration.shape[0]*self.acceleration.shape[1],
+                                       self.acceleration.shape[2],self.acceleration.shape[3]))
+            if 'orientation' in data.keys():
+                self.orientation = np.reshape(self.orientation, 
+                                      (self.orientation.shape[0]*self.orientation.shape[1],
+                                       self.orientation.shape[2],self.orientation.shape[3]))
             self.sequences = self.images.shape[0]
             
         if image_channels == 1:
@@ -429,6 +462,9 @@ class DataHolder(object):
         self.controls = torch.from_numpy(self.controls).float().to(device)
         self.odometry = torch.from_numpy(self.odometry).float().to(device)
         self.params   = torch.from_numpy(self.params).float().to(device)
+        if hasattr(self, 'acceleration') and hasattr(self, 'orientation'):
+            self.acceleration = torch.from_numpy(self.acceleration).float().to(device)
+            self.orientation = torch.from_numpy(self.orientation).float().to(device)
         
         return
     

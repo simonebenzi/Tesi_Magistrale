@@ -3,6 +3,9 @@
 from KVAE_models_and_utils_codes import Combined_MJPFs_running_functions
 from KVAE_models_and_utils_codes import Python_loading_utils as PLU
 ###############################################################################
+# Select to use IMU or not
+use_IMU = True
+###############################################################################
 # PATHS
 pathWhereDatasetFolderIsDefined = 'ConfigurationFiles/BaseDataFolder.txt'
 KVAEconfigurationPath = 'ConfigurationFiles/Config_KVAE.json'
@@ -24,4 +27,4 @@ kvaeOfV, transitionMatNumpy, transMatsTimeNumpy, nodesDistanceMatrixNumpy, \
 ###############################################################################
 # MAIN LOOP
 trackingCase = 110
-kvaeOfV = Combined_MJPFs_running_functions.RunCombinedMJPF(configKVAE, configCombinedMJPFs, trackingCase, kvaeOfV, testingData)
+kvaeOfV = Combined_MJPFs_running_functions.RunCombinedMJPF(configKVAE, configCombinedMJPFs, trackingCase, kvaeOfV, testingData, use_IMU)

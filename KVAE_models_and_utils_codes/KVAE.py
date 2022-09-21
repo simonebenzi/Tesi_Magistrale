@@ -625,7 +625,7 @@ class KalmanVariationalAutoencoder(Model.Model):
     
     @staticmethod 
     def ExtractBatchInputsDataStructure4DWithoutDistances(data, currentBatchNumber, batchSize, image_channels):
-        
+
          # Select slice corresponding to batch
         slc = slice(currentBatchNumber * batchSize, (currentBatchNumber + 1) * batchSize)
         
@@ -639,12 +639,19 @@ class KalmanVariationalAutoencoder(Model.Model):
             # invert color and batch dimensions
             currentImagesBatch = torch.swapaxes(currentImagesBatch, 0, 1)
             
-        # Also for controls, odometry and distances
+        # Also for controls, odometry, distances, acceleration and angular velocity
         currentControlsBatch  = data.controls[slc].to(device)
         currentOdometryBatch  = data.odometry[slc].to(device)
         currentParamsBatch    = data.params[slc].to(device)
-        
-        return currentImagesBatch, currentControlsBatch, currentOdometryBatch, currentParamsBatch
+        if hasattr(data, 'acceleration') and hasattr(data, 'orientation'):
+            # Calculate bias and subtract it from all the acceleration data
+            acc_bias = torch.mean(data.acceleration[0:100,:], dim=0)
+            acc_without_bias  = data.acceleration - acc_bias
+            currentAccBatch       = acc_without_bias[slc].to(device)
+            currentOrientBatch    = data.orientation[slc].to(device)
+            return currentImagesBatch, currentControlsBatch, currentOdometryBatch, currentParamsBatch, currentAccBatch, currentOrientBatch
+        else:
+            return currentImagesBatch, currentControlsBatch, currentOdometryBatch, currentParamsBatch
         
     @staticmethod
     def ExtractBatchInputsDataStructure4D(data, distances, currentBatchNumber, batchSize, image_channels):

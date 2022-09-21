@@ -11,8 +11,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import os
+import scipy.stats
 from torchvision.utils import save_image
 import unittest
+from navpy import quat2angle
+
+from prova import CalculateWeightForIMU
 
 #from ConfigurationFiles import Config_GPU as ConfigGPU 
 
@@ -136,6 +140,12 @@ class KVAE_odometry_from_video(nn.Module):
         self.indicesWaitingAnomalies.append(2)
         # Initialize anomaly windows
         self.InitializeAnomalyWindows()
+
+        # First odometry value
+        self.firstOdometryValue = None
+
+        # First orientation value
+        self.firstOrientationValue = None
         
         # Restarting information
         self.usingAnomalyThresholds = usingAnomalyThresholds
@@ -406,6 +416,113 @@ class KVAE_odometry_from_video(nn.Module):
         
         
         return
+
+    ############################################################################
+
+    # Function to calculate the odometry value using IMU
+    def CalculateOdometryFromIMU(self, orientation, acceleration, current_odometry, initial_orientation):
+        add_acceleration = True
+
+        orientation = np.asarray(orientation)
+        print('Current orientation size: {}'.format(orientation.shape))
+        acceleration = np.asarray(acceleration)
+        print('Current acceleration size: {}'.format(acceleration.shape))
+        print('Current odometry size: {}'.format(current_odometry.shape))
+        initial_orientation = np.asarray(initial_orientation)
+        print('Initial orientation size: {}'.format(initial_orientation.shape))
+
+        # Frame rate
+        frame_rate = 30
+
+        # Initial position and initial velocity
+        initial_pos = self.firstOdometryValue[0:2, :]
+        initial_vel = self.firstOdometryValue[2:4, :]
+        # From quaternions to rotations angles
+        initial_yaw = quat2angle(initial_orientation[0,0], initial_orientation[0,1:4], output_unit='rad')[2]
+        yaw = quat2angle(orientation[0,0], orientation[0,1:4], output_unit='rad')[2]
+
+        # Current velocity
+        current_vel = current_odometry[2:4, :]
+        current_vel = np.asarray(current_vel)
+        # Current position
+        current_pos = current_odometry[0:2, :]
+        current_pos = np.asarray(current_pos)
+
+        # Absolute orientation (alpha_y)
+        alpha_y = yaw - initial_yaw
+
+        # Array for next odometry
+        next_odometry = np.zeros((4,current_odometry.shape[1]))
+
+        for i in range(current_vel.shape[1]):
+            # Angle between current and initial velocity
+            a_3d = np.append(current_vel[:,i], [0])
+            b_3d = np.append(initial_vel[:,i], [0])
+            c = np.cross(a_3d, b_3d)
+            c = np.asarray(c)
+
+            if c[2] < 0:
+                theta = -np.arctan2(np.linalg.norm(c),np.dot(current_vel[:,i],initial_vel[:,1]))
+            else:
+                theta = np.arctan2(np.linalg.norm(c),np.dot(current_vel[:,i],initial_vel[:,1]))
+        
+            beta_i = theta
+
+            blue_angle = beta_i + alpha_y
+
+            # Define rotation matrix
+            R = [[np.cos(blue_angle), -np.sin(blue_angle)],
+                [np.sin(blue_angle), np.cos(blue_angle)]]
+
+            R = np.asarray(R)
+
+            #Calculate next velocity, next acceleration on xy and next position
+            next_vel_without_acc = np.matmul(R, current_vel[:,i].transpose())
+            next_vel_without_acc = next_vel_without_acc.transpose()
+
+            if add_acceleration:
+                # Calculate acceleration using angle btw current vel and axes
+                angleBetweenVelAndAxes = np.angle(current_vel[0,i] + 1j * current_vel[1,i])
+                # Project the acceleration on only the first component along the x and y axis
+                next_acc = self.getAccelerationOnXYOnlyFirstComponent(acceleration, angleBetweenVelAndAxes)
+            else:
+                next_acc = [0, 0]
+        
+            next_acc = np.asarray(next_acc)
+
+            # Divide by data rate
+            next_acc_mod = 0.5*next_acc/(frame_rate * frame_rate)
+
+            # Calculate next velocity
+            next_acc = next_acc.transpose()
+            next_vel = next_vel_without_acc + next_acc/frame_rate
+            next_vel = next_vel.transpose()
+
+            # Calculate position
+            next_pos = current_pos[:,i].transpose() + next_vel_without_acc + next_acc_mod.transpose()
+            next_pos = next_pos.transpose()
+
+            # Define next odometry vector
+            next_odometry[:,i] = np.concatenate((next_pos,next_vel))[:,0]
+
+        print('Next odometry size {}'.format(next_odometry.shape))
+
+        return next_odometry
+
+    # Function to project the acceleration on only the first component along the x and y axis
+    def getAccelerationOnXYOnlyFirstComponent(self, acc_motion, angleBetweenVelAndAxes):
+        # Calculate acceleration module 
+        acc_motion = acc_motion.transpose()
+        acc_module = acc_motion[0]
+
+        # Acceleration's projection on x and y
+        acc_x = acc_module * np.cos(angleBetweenVelAndAxes)
+        acc_y = acc_module * np.sin(angleBetweenVelAndAxes)
+        acc_xy = [acc_x, acc_y]
+
+        return acc_xy
+
+    ############################################################################
     
     # Code 110: Performing localization and anomaly detection given only the image data.
     # INPUTS:
@@ -429,6 +546,7 @@ class KVAE_odometry_from_video(nn.Module):
                                    reconstructedImagesFolder = '', fastDistanceCalculation = False, 
                                    percentageParticlesToReinitialize = 0):
 
+        print(self.anomaliesMeans.shape[0])
         #######################################################################
         # 1) ------ PARTICLE-INDEPENDENT CALCULATIONS
         # A) ENCODE AND DECODE
@@ -497,8 +615,10 @@ class KVAE_odometry_from_video(nn.Module):
         if self.timeInstant != 0 or knownStartingPoint == False:  
             # B) Update the odometry balancing prediction through transition matrices and 
             # prediction through matrices D and E.
+            print('Before update: {}'.format(torch.mean(self.mjpf.particlesMeansUpdated.clone(), 1)))
             self.mjpf.UpdateParticlesMeansAndCovariancesGivenDifferentObservedStatesAndDifferentObservationCovariancesSingleMJPF(
                     self.updatedValuesFromDMatrices.clone(), self.clusterGraphVideo.nodesCovD)
+            print('After update: {}'.format(torch.mean(self.mjpf.particlesMeansUpdated.clone(), 1)))
             # Saving the updated odometry value before resampling
         self.updatedOdometryValuesBeforeResampling = self.mjpf.particlesMeansUpdated.clone()
         #######################################################################
@@ -620,6 +740,258 @@ class KVAE_odometry_from_video(nn.Module):
         self.timeAfterReinit += 1
         
         return
+
+    ###########################################################################
+    # Performing localization given the image data and IMU data
+
+    def CombinedMJPFsVideoOdometrySingleMJPFWithIMU(self, currentImagesBatch, currentParamsBatch, currentAccBatch, currentOrientBatch,
+                                   outputFolder, type_of_weighting = 0, 
+                                   knownStartingPoint = False, saveReconstructedImages = False,
+                                   reconstructedImagesFolder = '', fastDistanceCalculation = False, 
+                                   percentageParticlesToReinitialize = 0):
+
+        #######################################################################
+        # 1) ------ PARTICLE-INDEPENDENT CALCULATIONS
+        # A) ENCODE AND DECODE
+        # Performed calling the encoding and decoding method on the VAE object
+        reconstructedImagesBatch, a_seq, a_mu, a_var = self.kvae.CallVAEEncoderAndDecoderOverBatchSequence(currentImagesBatch)
+        # Also consider the reconstruction error and save it
+        imageReconstructionAnomalies = F.mse_loss(reconstructedImagesBatch, currentImagesBatch,size_average=False)
+        # Save the reconstructed images, if requested
+        if saveReconstructedImages == True:            
+            if not os.path.exists(reconstructedImagesFolder):
+                os.makedirs(reconstructedImagesFolder)
+            save_image(torch.squeeze(torch.squeeze(reconstructedImagesBatch)), 
+                       reconstructedImagesFolder + '/%.4d.jpg' % self.timeInstant)            
+        # This is just to take out one non-necessary dimension from a_mu
+        a_mu_flattened   = a_mu[0, 0:1, :].clone()
+        # B) Find distances from video clusters
+        # Find distances from video clustering centers. This is done by passing the encoded values of the current batch 
+        # and finding the distance from them to the centers of the clusters
+        if type_of_weighting == 0 or self.timeInstant == 0:
+            if fastDistanceCalculation == False:
+                distancesFromVideo  = self.FindDistancesFromVideoClusters(a_mu)   
+            else:
+                distancesFromVideo  = self.clusterGraphVideo.FindDistancesFromVideoClustersAbsOfMeans(a_mu)  
+            _distFromVideo      = distancesFromVideo[:, 0, :].clone()
+            _distFromVideo      = _distFromVideo - torch.min(_distFromVideo) + 1
+            # C) Calculating alpha from the cluster distances
+            self.direct_alpha_from_video              = self.alphaDistProbVideo(_distFromVideo).clone()
+            self.alpha_from_video_plus_sequencing     = self.direct_alpha_from_video.clone() + 1e-8
+        #######################################################################
+        # 2) ------ INITIALIZATIONS
+        # IF WE DON'T KNOW THE ODOMETRY OF THE FIRST TIME INSTANT
+        if self.timeInstant == 0 and knownStartingPoint == False:            
+            # A) Initializing the particles of video MJPF based on alpha vector.
+            self.mjpf_video.InitializeParticlesBasedOnGivenClusterProbabilities(torch.squeeze(self.alpha_from_video_plus_sequencing))
+            # B) Initialize also odometry with same cluster assignments of video
+            self.mjpf.InitializeParticlesBasedOnGivenClusterAssignments(self.mjpf_video.clusterAssignments)
+            # C) Initialize the first orientation value to calculate predictions with IMU
+            self.firstOrientationValue = currentOrientBatch
+        # IF WE KNOW THE ODOMETRY OF THE FIRST TIME INSTANT
+        elif self.timeInstant == 0 and knownStartingPoint == True: 
+            # A) Find the distances of the given odometry from the clusters
+            distancesFromOdometryClustersFirstTimeInstant  = self.FindDistancesFromParamsClusters(currentParamsBatch)        
+            _distFromOdometryClustersFirstTimeInstant      = distancesFromOdometryClustersFirstTimeInstant[:, 0, :].clone()
+            _distFromOdometryClustersFirstTimeInstant      = _distFromOdometryClustersFirstTimeInstant - torch.min(_distFromOdometryClustersFirstTimeInstant) + 1
+            # B) Calculating alpha from the cluster distances
+            DirectAlphaFromOdometryClustersFirstTimeInstant = self.kvae.alphaDistProb(_distFromOdometryClustersFirstTimeInstant)            
+            # C) Initializing the particles of video MJPF based on alpha vector
+            self.mjpf_video.InitializeParticlesBasedOnGivenClusterProbabilities(
+                torch.squeeze(DirectAlphaFromOdometryClustersFirstTimeInstant))
+            # D) Initialize also odometry with same cluster assignments of video and with the
+            #    GIVEN ODOMETRY
+            self.mjpf.InitializeParticlesBasedOnGivenClusterAssignments(self.mjpf_video.clusterAssignments)
+            self.mjpf.InitializeParticlesMeanGivenSingleValue(currentParamsBatch, self.mjpf.nodesCov[0,:,:]/1000)      
+            # E) Initialize the first orientation value to calculate predictions with IMU
+            self.firstOrientationValue = currentOrientBatch        
+        #######################################################################
+        # 3) ------ VIDEO UPDATE
+        # A) Particles likelihoods, given the cluster to which they belong
+        if type_of_weighting == 0:
+            particlesLikelihoodGivenCluster = self.mjpf_video.ObtainParticleLikelihoodGivenProbabilitiesOfClusters(
+                    self.alpha_from_video_plus_sequencing)
+        # B) Perform video UPDATE using video clustering
+        self.mjpf_video.PerformUpdateOfParticlesUsingMatrices(a_mu_flattened)   
+        # 'a' state update just for debugging
+        self.mjpf_video.ObtainAUpdateFromZUpdateForAllParticles()
+        # C) Find evaluated odometry from video latent state values
+        self.updatedValuesFromDMatrices           = self.mjpf_video.FindParticlesUsingDMatrices().clone()
+        #######################################################################
+        # 4) ------ ODOMETRY 'UPDATE'
+        if self.timeInstant != 0 or knownStartingPoint == False:  
+            # B) Update the odometry balancing prediction through transition matrices and 
+            # prediction through matrices D and E.
+            updatedOdometryAtPreviousInstant = self.mjpf.particlesMeansUpdated.clone()
+            if self.timeInstant == 1:
+                # First odometry value to calculate predictions with IMU
+                self.firstOdometryValue = self.mjpf.particlesMeansPredicted.clone()  
+                estimatedOdometryFromIMU = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, self.firstOdometryValue, self.firstOrientationValue)
+            elif self.timeInstant != 0:
+                estimatedOdometryFromIMU = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, updatedOdometryAtPreviousInstant, self.firstOrientationValue)
+            
+            self.mjpf.UpdateParticlesMeansAndCovariancesGivenDifferentObservedStatesAndDifferentObservationCovariancesSingleMJPF(
+                    self.updatedValuesFromDMatrices.clone(), self.clusterGraphVideo.nodesCovD)
+
+        # Saving the updated odometry value before resampling
+        self.updatedOdometryValuesBeforeResampling = self.mjpf.particlesMeansUpdated.clone() # 4x150 - 150 particelle
+        #######################################################################
+        # Calculate KLDA
+        if self.timeInstant > 0:
+            KLDA  = self.mjpf.CalculateOverallKLDA(self.alpha_from_video_plus_sequencing)
+        else:
+            KLDA  = torch.zeros(1)
+        #######################################################################
+        # 5) ------ VIDEO REWEIGHTING
+        # A) Perform reweighting of particles based on alpha
+        if type_of_weighting == 0: # using the cluster likelihoods + video anomaly
+            anomalies_video         = self.mjpf_video.FindAStatesPredictionVsObservationAnomalies(a_mu) 
+            self.anomalies_odometry = self.mjpf.FindStatePredictionVsExternalValuesAnomalyMSE(self.updatedValuesFromDMatrices.clone())
+            self.mjpf_video.ReweightParticlesBasedOnAnomalyAndLikelihoods(anomalies_video,particlesLikelihoodGivenCluster)            
+        else:            
+            if type_of_weighting > 0:
+                raise NonExistentTypeOfWeighting(type_of_weighting)
+        #######################################################################
+        # 6) ------ ANOMALIES CALCULATION     
+        if self.timeInstant == 0:
+            # Array where to save the time instants in which restarting is perfomed
+            self.whenRestarted = []
+            # Array to save the index of the anomaly causing the restart
+            self.whyRestarted = []
+            # percentage of particles that could be reinitialized
+            self.numberOfParticlesToReinitialize = int(np.floor(percentageParticlesToReinitialize*self.mjpf.numberOfParticles/100)) 
+        if self.timeInstant == 0 or self.reinitialized == True:           
+            self.HandleAnomalyWindowingAfterRestart()  
+        if self.timeAfterReinit > 0:
+            anomalyVectorCurrentTimeInstant = []
+            anomalyVectorCurrentTimeInstant.append(KLDA.item())
+            anomalyVectorCurrentTimeInstant.append(torch.min(anomalies_video).item())
+            anomalyVectorCurrentTimeInstant.append(imageReconstructionAnomalies.item())
+            anomalyVectorCurrentTimeInstant.append(torch.min(particlesLikelihoodGivenCluster).item())
+            diffsPreds = torch.linalg.norm(self.updatedValuesFromDMatrices - self.mjpf.particlesMeansPredicted, dim = 1)
+            mean_diffsPreds = torch.mean(torch.mean(diffsPreds)).item()
+            anomalyVectorCurrentTimeInstant.append(mean_diffsPreds)
+            self.anomalyVectorCurrentTimeInstant = np.asarray(anomalyVectorCurrentTimeInstant)
+        else:
+            self.anomalyVectorCurrentTimeInstant = [0] * self.numberOfAnomalies
+
+        print(self.anomalyVectorCurrentTimeInstant)
+
+        #######################################################################
+        # 7) ------ IMU UPDATE
+        # Find the weight for the IMU 
+        if self.timeInstant > 0:
+            weights = []
+            for i in range(self.anomaliesMeans.shape[0]):
+                mean = self.anomaliesMeans[i]
+                std = self.anomaliesStandardDeviations[i]
+                current_anomaly = self.anomalyVectorCurrentTimeInstant[i]
+                weight = self.CalculateWeightForIMU(mean, std, current_anomaly)
+                weights.append(weight)
+
+
+            print('IMU weights: {}'.format(weights))
+            weight_IMU = np.mean(weights)
+            print(weight_IMU)
+        
+            # Compute odometry update with IMU prediction
+            self.mjpf.particlesMeansUpdated = \
+                (self.updatedOdometryValuesBeforeResampling * weight_IMU) + (estimatedOdometryFromIMU * (1 - weight_IMU))
+        
+        #######################################################################
+        # 8) ------ HANDLING ANOMALY WINDOWS
+        # A) Handle the anomaly windows at the current time instant   
+        if self.usingAnomalyThresholds == True:
+            if self.timeAfterReinit > self.time_window:
+                self.EliminateOldestValueFromAnomalyWindows()   
+            if self.timeAfterReinit > 0:
+                self.UpdateAnomalyWindows(anomalyVectorCurrentTimeInstant)
+            # B) Calculate sum over the windows
+            sumsOverAnomalyWindows = self.CalculateSumsOverAnomalyWindows()
+            self.PrintSumsOverAnomalyWindows(sumsOverAnomalyWindows)
+            # C) Check if it is necessary to restart
+            if self.timeAfterReinit > 0 and self.usingAnomalyThresholds == True:
+                self.CheckIfParticlesRestartingIsNecessary(sumsOverAnomalyWindows)    
+
+        #######################################################################
+        # 8) ------ RESAMPLING AND RESTARTING         
+        resamplingNecessary = self.mjpf_video.CheckIfResamplingIsNecessary()        
+        # If resampling is necessary
+        if resamplingNecessary or self.needReinit: # also resample when reinitialization is requested            
+            print('RESAMPLE')   
+            if self.needReinit: # Put the low resampling threshold (as it is a restart)
+                self.mjpf.resamplingThreshold       = self.firstResampleThresh
+                self.mjpf_video.resamplingThreshold = self.firstResampleThresh       
+            else: # Put the high resampling threshhold
+                self.mjpf.resamplingThreshold       = self.resampleThresh
+                self.mjpf_video.resamplingThreshold = self.resampleThresh 
+            #######################################################################
+            # A) VIDEO RESAMPLING
+            self.newIndicesForSwapping = self.mjpf_video.ResampleParticles()               
+            #######################################################################
+            # B) ODOMETRY RESAMPLING
+            self.mjpf.ResampleParticlesGivenNewIndices(self.newIndicesForSwapping.copy())           
+            #######################################################################
+            # C) RESTARTING OF A SUBSET OF PARTICLES
+            if self.needReinit == True:                     
+                # Select the indices of particles with smallest weights
+                # This is unnecessary if restarting is done after resampling, 
+                # as the weights will be the same for all particles, but let's 
+                # keep it in case of changes.
+                selectedIndices = self.mjpf_video.SelectIndicesOfParticlesWithLowerWeights(
+                        self.numberOfParticlesToReinitialize)
+                # Restart the subset of particles
+                for particleIndex in selectedIndices:    
+                    particleIndex = int(particleIndex)
+                    self.mjpf_video.InitializeParticleGivenClusterProbabilities(
+                            torch.squeeze(self.alpha_from_video_plus_sequencing), particleIndex)
+                    self.mjpf.InitializeParticleBasedOnGivenClusterAssignmentsAndIndex(
+                            self.mjpf_video.clusterAssignments, particleIndex)                   
+                self.reinitialized = True
+                self.timeAfterReinit = -1
+                self.whenRestarted.append(self.timeInstant)
+                self.needReinit == False
+            else:
+                self.reinitialized = False            
+        else:
+            self.newIndicesForSwapping = np.zeros(self.mjpf.numberOfParticles)     
+        if self.needReinit == False:
+            self.indicesRestartedParticles = np.zeros(self.numberOfParticlesToReinitialize) 
+        else:
+            self.indicesRestartedParticles = np.asarray(selectedIndices)     
+
+        #######################################################################
+        # 9) ------ VIDEO PREDICTION
+        # A) superstate prediction
+        self.mjpf_video.PerformSuperstatesPrediction()
+        self.mjpf.clusterAssignments = self.mjpf_video.clusterAssignments.copy()
+        self.mjpf.timeInClusters     = self.mjpf_video.timeInClusters.clone()
+        # B) state prediction        
+        self.mjpf_video.PerformPredictionOfParticlesUsingMatrices()
+        # a state prediction just for debugging
+        self.mjpf_video.ObtainAPredictionFromZPredictionForAllParticles()       
+
+        #######################################################################
+        # 10) ------ ODOMETRY PREDICTION
+        # A) state prediction
+        self.mjpf.PredictParticlesMeansAndCovariances() 
+        
+        #######################################################################
+        # 11) ------ Plus time
+        self.timeInstant += 1
+        self.timeAfterReinit += 1
+        
+        return
+
+    def CalculateWeightForIMU(self, anomaliesMean, anomaliesStd, current_anomaly):
+        weight = scipy.stats.norm(anomaliesMean, anomaliesStd).pdf(current_anomaly)
+        x = np.linspace(anomaliesMean - 3*anomaliesStd, anomaliesMean + 3*anomaliesStd, 1000)
+        gaussian_distribution = scipy.stats.norm(anomaliesMean, anomaliesStd).pdf(x)
+        minValue = np.min(gaussian_distribution)
+        maxValue = np.max(gaussian_distribution)
+        normalized_weight = (weight - minValue) / (maxValue - minValue)
+
+        return normalized_weight
     
     ###########################################################################
     # Functions for plotting prediction and updates at image level against
