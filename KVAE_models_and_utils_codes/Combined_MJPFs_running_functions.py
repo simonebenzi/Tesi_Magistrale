@@ -246,6 +246,7 @@ def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData, use_IMU):
         predicted_params_min_all = []
         clusterAssignments_numpy_all = []
         anomalies_odometry_numpy_all = []
+        anomalies_hybrid_numpy_all = []
         allPredictedParams_numpy_all = []
         clusterAssignments_od_numpy_all = []
         odometryUpdatedParticles_od_numpy_all = []
@@ -279,13 +280,15 @@ def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData, use_IMU):
                     kvaeOfV.kvae.ExtractBatchInputsDataStructure4DWithoutDistances(data = testingData, 
                                                                                 currentBatchNumber = i, 
                                                                                 batchSize = config['batch_size'], 
-                                                                                image_channels = config['image_channels'])
+                                                                                image_channels = config['image_channels'], 
+                                                                                use_IMU = use_IMU)
             else:
                 currentImagesBatch, currentControlsBatch, currentOdometryBatch, currentParamsBatch = \
                     kvaeOfV.kvae.ExtractBatchInputsDataStructure4DWithoutDistances(data = testingData, 
                                                                                 currentBatchNumber = i, 
                                                                                 batchSize = config['batch_size'], 
-                                                                                image_channels = config['image_channels']) 
+                                                                                image_channels = config['image_channels'],
+                                                                                use_IMU = use_IMU) 
             # If there is no color channel, add one after batch size
             if len(currentImagesBatch.shape) == 4:
                 currentImagesBatch = torch.unsqueeze(currentImagesBatch, 1)
@@ -373,6 +376,11 @@ def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData, use_IMU):
                 
                 SaveOutputToMATLABGivenDebugCode(kvaeOfV.anomalies_odometry.clone(), anomalies_odometry_numpy_all, 
                                                  configOfV['output_folder'], 'anomalies_odometry', case)
+
+                #print(kvaeOfV.timeInstant)
+                #if kvaeOfV.timeInstant > 1:
+                    #SaveOutputToMATLABGivenDebugCode(kvaeOfV.hybridUpdate.clone(), anomalies_hybrid_numpy_all, 
+                                                    #configOfV['output_folder'], 'odometryHybridUpdatedParticles_od', case)
                 
                 whenRestarted_numpy = np.asarray(kvaeOfV.whenRestarted)
                 sio.savemat(configOfV['output_folder'] + '/OD_whenRestarted_numpy_debugCode110' + '.mat', 
@@ -382,15 +390,15 @@ def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData, use_IMU):
                 sio.savemat(configOfV['output_folder'] + '/OD_whyRestarted_numpy_debugCode110' + '.mat', 
                             {'whyRestarted':whyRestarted_numpy})
                  
-                #newIndicesForSwapping_numpy = kvaeOfV.newIndicesForSwapping
-                #newIndicesForSwapping_numpy_all.append(newIndicesForSwapping_numpy)
-                #sio.savemat(configOfV['output_folder'] + '/OD_newIndicesForSwapping_numpy_debugCode110' + '.mat', 
-                            #{'newIndicesForSwapping':newIndicesForSwapping_numpy_all})
+                newIndicesForSwapping_numpy = kvaeOfV.newIndicesForSwapping
+                newIndicesForSwapping_numpy_all.append(newIndicesForSwapping_numpy)
+                sio.savemat(configOfV['output_folder'] + '/OD_newIndicesForSwapping_numpy_debugCode110' + '.mat', 
+                            {'newIndicesForSwapping':newIndicesForSwapping_numpy_all})
                 
-                #indicesRestartedParticles_numpy = kvaeOfV.indicesRestartedParticles
-                #indicesRestartedParticles_numpy_all.append(indicesRestartedParticles_numpy)
-                #sio.savemat(configOfV['output_folder'] + '/OD_indicesRestartedParticles_numpy_debugCode110' + '.mat', 
-                            #{'indicesRestartedParticles':indicesRestartedParticles_numpy_all})
+                indicesRestartedParticles_numpy = kvaeOfV.indicesRestartedParticles
+                indicesRestartedParticles_numpy_all.append(indicesRestartedParticles_numpy)
+                sio.savemat(configOfV['output_folder'] + '/OD_indicesRestartedParticles_numpy_debugCode110' + '.mat', 
+                            {'indicesRestartedParticles':indicesRestartedParticles_numpy_all})
 
                 ###################################################################
                 # ANOMALIES

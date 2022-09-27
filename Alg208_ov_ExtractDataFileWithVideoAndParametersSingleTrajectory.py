@@ -17,9 +17,6 @@ use_IMU = True
 # This will print the indices of the loop 
 check_mode = True
 ###############################################################################
-# Folders definition
-# Select shadow (True) or no shadow (False) scenario
-isShadow = False
 # Path to configuration file of KVAE
 KVAEconfigurationPath  = 'ConfigurationFiles/Config_KVAE.json'
 # Path to .txt file containing the path to the dataset folder
@@ -27,10 +24,8 @@ pathWhereDatasetFolderIsDefined = 'ConfigurationFiles/BaseDataFolder.txt'
 baseFolderPath = PLU.ExtractBaseFolderPath(pathWhereDatasetFolderIsDefined)
 print(baseFolderPath)
 # Path where to save the output of this code
-if not isShadow:
-    path_to_inputs_to_final_model_folder = baseFolderPath + '/InputsToFinalModel_NoShadow/'
-else:
-    path_to_inputs_to_final_model_folder = baseFolderPath + '/InputsToFinalModel_Shadow/'
+path_to_inputs_to_final_model_folder = baseFolderPath + '/InputsToFinalModel/'
+
 if not os.path.exists(path_to_inputs_to_final_model_folder):
      os.makedirs(path_to_inputs_to_final_model_folder)
 ###############################################################################
@@ -71,8 +66,8 @@ for dataCase in range(3):
         path_to_images_folder = baseFolderPath + '/test_images/'
         path_to_GSs = baseFolderPath + '/test_GSs/test_GSs.mat'
         path_to_GSs_cells = baseFolderPath + '/test_GSs/test_GSs_cells.mat'
-        path_to_acceleration = baseFolderPath + '/test_IMU/accelerationES.mat'
-        path_to_orientation = baseFolderPath + '/test_IMU/orientationES.mat'
+        path_to_acceleration = baseFolderPath + '/test_IMU/linearAcceleration.mat'
+        path_to_orientation = baseFolderPath + '/test_IMU/orientation.mat'
         path_to_inputs_to_final_model_full = path_to_inputs_to_final_model_folder + '/test_data_file_sl_{}_d1_{}_d2_{}'.format(
             sequenceLength, config['dimension_x'], config['dimension_y'])
         path_to_inputs_to_final_model = path_to_inputs_to_final_model_folder + '/test_data_file'

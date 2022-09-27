@@ -61,7 +61,7 @@ def ExtractDataForKVAE(config, path_to_GSs, path_to_GSs_cells, path_to_images_fo
     # Loading IMU (acceleration and angular velocity) data
     if (path_to_acc is not None) and (path_to_orient is not None) and use_IMU:
         print('Loading IMU (acceleration and angular velocity) data')
-        acceleration = mat4py.loadmat(path_to_acc)['linearAccelerationSynch']
+        acceleration = mat4py.loadmat(path_to_acc)['linearAcceleration']
         acceleration = np.asarray(acceleration)
         orientation = mat4py.loadmat(path_to_orient)['orientationSynch']
         orientation = np.asarray(orientation)

@@ -160,6 +160,10 @@ class KVAE_odometry_from_video(nn.Module):
         self.whereRestarted = []        
         self.needReinit = False
         self.needReinitAfterItIsGoodAgain = False
+
+        # IMU estimation
+        if self.mjpf != None:
+            self.estimatedOdometryFromIMU = np.zeros((4, self.mjpf.numberOfParticles))
         
         # Resampling thresholds
         if self.mjpf != None:
@@ -420,92 +424,84 @@ class KVAE_odometry_from_video(nn.Module):
     ############################################################################
 
     # Function to calculate the odometry value using IMU
-    def CalculateOdometryFromIMU(self, orientation, acceleration, current_odometry, initial_orientation):
+    def CalculateOdometryFromIMU(self, orientation, acceleration, current_odometry, initial_orientation, index):
         add_acceleration = True
 
         orientation = np.asarray(orientation)
-        print('Current orientation size: {}'.format(orientation.shape))
         acceleration = np.asarray(acceleration)
-        print('Current acceleration size: {}'.format(acceleration.shape))
-        print('Current odometry size: {}'.format(current_odometry.shape))
         initial_orientation = np.asarray(initial_orientation)
-        print('Initial orientation size: {}'.format(initial_orientation.shape))
 
         # Frame rate
         frame_rate = 30
 
         # Initial position and initial velocity
-        initial_pos = self.firstOdometryValue[0:2, :]
-        initial_vel = self.firstOdometryValue[2:4, :]
+        initial_vel = self.firstOdometryValue[2:4,index]
         # From quaternions to rotations angles
         initial_yaw = quat2angle(initial_orientation[0,0], initial_orientation[0,1:4], output_unit='rad')[2]
         yaw = quat2angle(orientation[0,0], orientation[0,1:4], output_unit='rad')[2]
 
         # Current velocity
-        current_vel = current_odometry[2:4, :]
+        current_vel = current_odometry[2:4]
         current_vel = np.asarray(current_vel)
         # Current position
-        current_pos = current_odometry[0:2, :]
+        current_pos = current_odometry[0:2]
         current_pos = np.asarray(current_pos)
 
         # Absolute orientation (alpha_y)
         alpha_y = yaw - initial_yaw
 
         # Array for next odometry
-        next_odometry = np.zeros((4,current_odometry.shape[1]))
+        next_odometry = np.zeros((4,1))
 
-        for i in range(current_vel.shape[1]):
-            # Angle between current and initial velocity
-            a_3d = np.append(current_vel[:,i], [0])
-            b_3d = np.append(initial_vel[:,i], [0])
-            c = np.cross(a_3d, b_3d)
-            c = np.asarray(c)
+        # Angle between current and initial velocity
+        a_3d = np.append(current_vel[:], [0])
+        b_3d = np.append(initial_vel[:], [0])
+        c = np.cross(a_3d, b_3d)
+        c = np.asarray(c)
 
-            if c[2] < 0:
-                theta = -np.arctan2(np.linalg.norm(c),np.dot(current_vel[:,i],initial_vel[:,1]))
-            else:
-                theta = np.arctan2(np.linalg.norm(c),np.dot(current_vel[:,i],initial_vel[:,1]))
+        if c[2] < 0:
+            theta = -np.arctan2(np.linalg.norm(c),np.dot(current_vel[:],initial_vel[:]))
+        else:
+            theta = np.arctan2(np.linalg.norm(c),np.dot(current_vel[:],initial_vel[:]))
         
-            beta_i = theta
+        beta_i = theta
 
-            blue_angle = beta_i + alpha_y
+        blue_angle = beta_i + alpha_y
 
-            # Define rotation matrix
-            R = [[np.cos(blue_angle), -np.sin(blue_angle)],
-                [np.sin(blue_angle), np.cos(blue_angle)]]
+        # Define rotation matrix
+        R = [[np.cos(blue_angle), -np.sin(blue_angle)],
+            [np.sin(blue_angle), np.cos(blue_angle)]]
 
-            R = np.asarray(R)
+        R = np.asarray(R)
 
             #Calculate next velocity, next acceleration on xy and next position
-            next_vel_without_acc = np.matmul(R, current_vel[:,i].transpose())
-            next_vel_without_acc = next_vel_without_acc.transpose()
+        next_vel_without_acc = np.matmul(R, current_vel[:].transpose())
+        next_vel_without_acc = next_vel_without_acc.transpose()
 
-            if add_acceleration:
-                # Calculate acceleration using angle btw current vel and axes
-                angleBetweenVelAndAxes = np.angle(current_vel[0,i] + 1j * current_vel[1,i])
-                # Project the acceleration on only the first component along the x and y axis
-                next_acc = self.getAccelerationOnXYOnlyFirstComponent(acceleration, angleBetweenVelAndAxes)
-            else:
-                next_acc = [0, 0]
+        if add_acceleration:
+            # Calculate acceleration using angle btw current vel and axes
+            angleBetweenVelAndAxes = np.angle(current_vel[0] + 1j * current_vel[1])
+            # Project the acceleration on only the first component along the x and y axis
+            next_acc = self.getAccelerationOnXYOnlyFirstComponent(acceleration, angleBetweenVelAndAxes)
+        else:
+            next_acc = [0, 0]
         
-            next_acc = np.asarray(next_acc)
+        next_acc = np.asarray(next_acc)
 
-            # Divide by data rate
-            next_acc_mod = 0.5*next_acc/(frame_rate * frame_rate)
+        # Divide by data rate
+        next_acc_mod = 0.5*next_acc/(frame_rate * frame_rate)
 
-            # Calculate next velocity
-            next_acc = next_acc.transpose()
-            next_vel = next_vel_without_acc + next_acc/frame_rate
-            next_vel = next_vel.transpose()
+        # Calculate next velocity
+        next_acc = next_acc.transpose()
+        next_vel = next_vel_without_acc + next_acc/frame_rate
+        next_vel = next_vel.transpose()
 
-            # Calculate position
-            next_pos = current_pos[:,i].transpose() + next_vel_without_acc + next_acc_mod.transpose()
-            next_pos = next_pos.transpose()
+        # Calculate position
+        next_pos = current_pos[:].transpose() + next_vel_without_acc + next_acc_mod.transpose()
+        next_pos = next_pos.transpose()
 
-            # Define next odometry vector
-            next_odometry[:,i] = np.concatenate((next_pos,next_vel))[:,0]
-
-        print('Next odometry size {}'.format(next_odometry.shape))
+        # Define next odometry vector
+        next_odometry[:] = np.concatenate((next_pos,next_vel))[:]
 
         return next_odometry
 
@@ -672,8 +668,8 @@ class KVAE_odometry_from_video(nn.Module):
             sumsOverAnomalyWindows = self.CalculateSumsOverAnomalyWindows()
             self.PrintSumsOverAnomalyWindows(sumsOverAnomalyWindows)
             # C) Check if it is necessary to restart
-            if self.timeAfterReinit > 0 and self.usingAnomalyThresholds == True:
-                self.CheckIfParticlesRestartingIsNecessary(sumsOverAnomalyWindows)
+            #if self.timeAfterReinit > 0 and self.usingAnomalyThresholds == True:
+                #self.CheckIfParticlesRestartingIsNecessary(sumsOverAnomalyWindows)
         #######################################################################
         # 8) ------ RESAMPLING AND RESTARTING         
         resamplingNecessary = self.mjpf_video.CheckIfResamplingIsNecessary()        
@@ -822,13 +818,16 @@ class KVAE_odometry_from_video(nn.Module):
         if self.timeInstant != 0 or knownStartingPoint == False:  
             # B) Update the odometry balancing prediction through transition matrices and 
             # prediction through matrices D and E.
-            updatedOdometryAtPreviousInstant = self.mjpf.particlesMeansUpdated.clone()
             if self.timeInstant == 1:
                 # First odometry value to calculate predictions with IMU
                 self.firstOdometryValue = self.mjpf.particlesMeansPredicted.clone()  
-                estimatedOdometryFromIMU = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, self.firstOdometryValue, self.firstOrientationValue)
+                for j in range(self.firstOdometryValue.shape[1]):
+                    current_odometry = self.firstOdometryValue[:,j]
+                    self.estimatedOdometryFromIMU[:,j] = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, current_odometry, self.firstOrientationValue,j)[:,0]
             elif self.timeInstant != 0:
-                estimatedOdometryFromIMU = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, updatedOdometryAtPreviousInstant, self.firstOrientationValue)
+                for j in range(self.mjpf.particlesMeansUpdated.clone().shape[1]):
+                    current_odometry = (self.mjpf.particlesMeansUpdated.clone())[:,j]
+                    self.estimatedOdometryFromIMU[:,j] = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, current_odometry , self.firstOrientationValue,j)[:,0]
             
             self.mjpf.UpdateParticlesMeansAndCovariancesGivenDifferentObservedStatesAndDifferentObservationCovariancesSingleMJPF(
                     self.updatedValuesFromDMatrices.clone(), self.clusterGraphVideo.nodesCovD)
@@ -895,8 +894,10 @@ class KVAE_odometry_from_video(nn.Module):
             print(weight_IMU)
         
             # Compute odometry update with IMU prediction
-            self.mjpf.particlesMeansUpdated = \
-                (self.updatedOdometryValuesBeforeResampling * weight_IMU) + (estimatedOdometryFromIMU * (1 - weight_IMU))
+            self.updateWithIMU  = \
+                (self.updatedOdometryValuesBeforeResampling * weight_IMU) + (self.estimatedOdometryFromIMU * (1 - weight_IMU))
+            self.updatedOdometryValuesBeforeResampling = self.updateWithIMU
+            self.mjpf.particlesMeansUpdated = self.updateWithIMU
         
         #######################################################################
         # 8) ------ HANDLING ANOMALY WINDOWS
@@ -910,8 +911,8 @@ class KVAE_odometry_from_video(nn.Module):
             sumsOverAnomalyWindows = self.CalculateSumsOverAnomalyWindows()
             self.PrintSumsOverAnomalyWindows(sumsOverAnomalyWindows)
             # C) Check if it is necessary to restart
-            if self.timeAfterReinit > 0 and self.usingAnomalyThresholds == True:
-                self.CheckIfParticlesRestartingIsNecessary(sumsOverAnomalyWindows)    
+            #if self.timeAfterReinit > 0 and self.usingAnomalyThresholds == True:
+                #self.CheckIfParticlesRestartingIsNecessary(sumsOverAnomalyWindows)    
 
         #######################################################################
         # 8) ------ RESAMPLING AND RESTARTING         

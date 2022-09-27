@@ -624,7 +624,7 @@ class KalmanVariationalAutoencoder(Model.Model):
     # and in 'PrepareInputsForKVAETesting'.
     
     @staticmethod 
-    def ExtractBatchInputsDataStructure4DWithoutDistances(data, currentBatchNumber, batchSize, image_channels):
+    def ExtractBatchInputsDataStructure4DWithoutDistances(data, currentBatchNumber, batchSize, image_channels, use_IMU):
 
          # Select slice corresponding to batch
         slc = slice(currentBatchNumber * batchSize, (currentBatchNumber + 1) * batchSize)
@@ -643,7 +643,7 @@ class KalmanVariationalAutoencoder(Model.Model):
         currentControlsBatch  = data.controls[slc].to(device)
         currentOdometryBatch  = data.odometry[slc].to(device)
         currentParamsBatch    = data.params[slc].to(device)
-        if hasattr(data, 'acceleration') and hasattr(data, 'orientation'):
+        if hasattr(data, 'acceleration') and hasattr(data, 'orientation') and use_IMU:
             # Calculate bias and subtract it from all the acceleration data
             acc_bias = torch.mean(data.acceleration[0:100,:], dim=0)
             acc_without_bias  = data.acceleration - acc_bias

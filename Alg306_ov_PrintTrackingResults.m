@@ -8,13 +8,21 @@ clear
 addpath('./MATLAB_paths');
 paths = DefineCodeAndDataPaths();
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Load IMU
+load('C:\Users\simob\Desktop\Old_training\Old_training\02\test_IMU\linearAcceleration.mat')
+load('C:\Users\simob\Desktop\Old_training\Old_training\02\test_IMU\orientation.mat')
+acc_bias = mean(linearAcceleration(1:100,:));
+linearAcceleration = linearAcceleration - acc_bias;% - [0.05, 0];
 %% Other necessary code
 AddAdditionalNecessaryPaths()
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Parameters to define
 % Final time instant to print
+T = 100; % Starting point for debug
 endingPoint = -1;
-last_time_to_plot = 2499;
+last_time_to_plot = 1999;
+linearAcceleration = linearAcceleration(1:last_time_to_plot,:);
+orientationSynch = orientationSynch(1:last_time_to_plot,:);
 final_to_print = last_time_to_plot;
 dataCase = 2; % train (0), validation (1) or test (2)
 timeStepsBeforeEndForErrCalculation = 10;
@@ -22,6 +30,10 @@ timeStepsBeforeEndForErrCalculation = 10;
 %% Add output folder
 outputFolder = paths.path_to_tracking_output;
 addpath(outputFolder);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Load GT data
+load(strcat(outputFolder, '\GT_anomalies_and_curves_ES.mat'))
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 [data, testingLength, alphas_from_assignments_video, ...
     alphas_from_assignments_odometry, realParamsDenorm, ...
@@ -85,7 +97,20 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% PLOTTING
 % tracking
+initial_velocity = predParamsCorrectedUpdatedOdometry_o(T,:,:) - predParamsCorrectedUpdatedOdometry_o(T-1,:,:);
+IMU_odometry = [];
+for i = T:last_time_to_plot
+    if i == T
+        current_vel = initial_velocity;
+    else
+        current_vel = predParamsCorrectedUpdatedOdometry_o(i,:,:) - predParamsCorrectedUpdatedOdometry_o(i-1,:,:);
+    end
+    new_odometry = CalculateOdometryFromIMU(orientationSynch(i,:), linearAcceleration(i,:), ...
+        predParamsCorrectedUpdatedOdometry_o(i,:,:), orientationSynch(T,:), initial_velocity, current_vel);
+    IMU_odometry = [IMU_odometry, new_odometry(:,1)];
 
+end
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 minX = min(realParams(:,1));
 maxX = max(realParams(:,1));
 minY = min(realParams(:,2));
@@ -196,7 +221,10 @@ std_value  = std([mean_distances_v; mean_distances_od]);
 
 errorsFigure = figure
 errorsFigure.Position = [0,0,1350, 300]
+area((GT == 1) * (mean_value+4*std_value),  'FaceColor',[1 0.8 0.8],'EdgeColor',[1 0.8 0.8]);
 hold on
+area((GT == 2) * (mean_value+4*std_value)  , 'FaceColor',[0.6 1 0.6],'EdgeColor',[0.6 1 0.6]);
+area((GT == 3) * (mean_value+4*std_value)   , 'FaceColor',[0.6 1 1],'EdgeColor',[0.5 1 1]);
 plot(mean_distances_v(1:last_time_to_plot), 'g')
 plot(mean_distances_od(1:last_time_to_plot), 'r')
 grid on 
@@ -205,7 +233,8 @@ axis ([0 last_time_to_plot 0 (mean_value+4*std_value)])
 xlabel('time', 'FontSize',15, 'Interpreter','latex')
 ylabel('Errors (m)', 'FontSize',15, 'Interpreter','latex')
 
-legend({'Errors from direct video DBN', ...
+legend({'Pedestrian visible', 'Car restart','Oscillating motion', ...
+    'Errors from direct video DBN', ...
     'Errors from combined DBN'},  ...
     'FontSize',15, 'Interpreter','latex', ...
     'Location', 'north', ...
@@ -257,14 +286,14 @@ ending = 6000;
 
 % Normalize anomalies
 
-abn_KLDA_norm = (abn_KLDA - min(abn_KLDA(begin:final_to_print)))/(max(abn_KLDA(begin:final_to_print))- min(abn_KLDA(begin:final_to_print)));
+abn_KLDA_norm = (abn_KLDA - min(abn_KLDA(begin:(final_to_print-1))))/(max(abn_KLDA(begin:(final_to_print-1)))- min(abn_KLDA(begin:(final_to_print-1))));
 
 
 %mean_abn_KLDAs_norm = (mean_abn_KLDAs - min(mean_abn_KLDAs(begin:final_to_print)))/(max(mean_abn_KLDAs(begin:final_to_print))- min(mean_abn_KLDAs(begin:final_to_print)));
 %min_abn_KLDAs_norm = (min_abn_KLDAs - min(min_abn_KLDAs(begin:final_to_print)))/(max(min_abn_KLDAs(begin:final_to_print))- min(min_abn_KLDAs(begin:final_to_print)));
 
-mean_abn_Video_norm = (mean_abn_Video - min(mean_abn_Video(begin:final_to_print)))/(max(mean_abn_Video(begin:final_to_print))- min(mean_abn_Video(begin:final_to_print)));
-min_abn_Video_norm = (min_abn_Video - min(min_abn_Video(begin:final_to_print)))/(max(min_abn_Video(begin:final_to_print))- min(min_abn_Video(begin:final_to_print)));
+mean_abn_Video_norm = (mean_abn_Video - min(mean_abn_Video(begin:(final_to_print-1))))/(max(mean_abn_Video(begin:(final_to_print-1)))- min(mean_abn_Video(begin:(final_to_print-1))));
+min_abn_Video_norm = (min_abn_Video - min(min_abn_Video(begin:(final_to_print-1))))/(max(min_abn_Video(begin:(final_to_print-1)))- min(min_abn_Video(begin:(final_to_print-1))));
 
 %{
 mean_abn_Odom_norm = (mean_abn_Odom - min(mean_abn_Odom(begin:final_to_print)))/(max(mean_abn_Odom(begin:final_to_print))- min(mean_abn_Odom(begin:final_to_print)));
@@ -273,12 +302,12 @@ min_abn_Odom_norm = (min_abn_Odom - min(min_abn_Odom(begin:final_to_print)))/(ma
 
 abn_Rec_norm = (abn_Rec - min(abn_Rec))/(max(abn_Rec)- min(abn_Rec));
 
-mean_diff_in_predictions_norm = (mean_diff_in_predictions - min(mean_diff_in_predictions(begin:final_to_print)))/(max(mean_diff_in_predictions(begin:final_to_print))- min(mean_diff_in_predictions(begin:final_to_print)));
-min_diff_in_predictions_norm = (min_diff_in_predictions - min(min_diff_in_predictions(begin:final_to_print)))/(max(min_diff_in_predictions(begin:final_to_print))- min(min_diff_in_predictions(begin:final_to_print)));
+mean_diff_in_predictions_norm = (mean_diff_in_predictions - min(mean_diff_in_predictions(begin:(final_to_print-1))))/(max(mean_diff_in_predictions(begin:(final_to_print-1)))- min(mean_diff_in_predictions(begin:(final_to_print-1))));
+min_diff_in_predictions_norm = (min_diff_in_predictions - min(min_diff_in_predictions(begin:(final_to_print-1))))/(max(min_diff_in_predictions(begin:(final_to_print-1)))- min(min_diff_in_predictions(begin:(final_to_print-1))));
 
-mean_clusterLikelihoods_norm = (mean_clusterLikelihoods - min(mean_clusterLikelihoods(begin:final_to_print)))/(max(mean_clusterLikelihoods(begin:final_to_print))- min(mean_clusterLikelihoods(begin:final_to_print)));
-min_clusterLikelihoods_norm = (min_clusterLikelihoods - min(min_clusterLikelihoods(begin:final_to_print)))/(max(min_clusterLikelihoods(begin:final_to_print))- min(min_clusterLikelihoods(begin:final_to_print)));
-entropy_clusterLikelihoods_norm = (entropy_clusterLikelihoods - min(entropy_clusterLikelihoods(begin:final_to_print)))/(max(entropy_clusterLikelihoods(begin:final_to_print))- min(entropy_clusterLikelihoods(begin:final_to_print)));
+mean_clusterLikelihoods_norm = (mean_clusterLikelihoods - min(mean_clusterLikelihoods(begin:(final_to_print-1))))/(max(mean_clusterLikelihoods(begin:(final_to_print-1)))- min(mean_clusterLikelihoods(begin:(final_to_print-1))));
+min_clusterLikelihoods_norm = (min_clusterLikelihoods - min(min_clusterLikelihoods(begin:(final_to_print-1))))/(max(min_clusterLikelihoods(begin:(final_to_print-1)))- min(min_clusterLikelihoods(begin:(final_to_print-1))));
+entropy_clusterLikelihoods_norm = (entropy_clusterLikelihoods - min(entropy_clusterLikelihoods(begin:(final_to_print-1))))/(max(entropy_clusterLikelihoods(begin:(final_to_print-1)))- min(entropy_clusterLikelihoods(begin:(final_to_print-1))));
 
 
 % Plotting
@@ -288,17 +317,17 @@ whenRestarted = data.whenRestarted;
 anomaliesFigure = figure
 anomaliesFigure.Position = [0,0,1350, 300]
 hold on
-plot(smooth(abn_KLDA_norm(1:last_time_to_plot)), 'm')
+plot(smooth(abn_KLDA_norm(1:(last_time_to_plot-1))), 'm')
 %plot(min_abn_KLDAs_norm(1:last_time_to_plot), 'm')
 %plot(mean_abn_Video_norm(1:last_time_to_plot), 'g')
 %plot(smooth(min_abn_Video_norm(1:last_time_to_plot)), 'g')
 %plot(min_abn_Odom_norm(1:last_time_to_plot), 'g')
-plot(smooth(abn_Rec_norm(1:last_time_to_plot)), 'r')
+plot(smooth(abn_Rec_norm(1:(last_time_to_plot-1))), 'r')
 %plot(smooth(mean_diff_in_predictions_norm(1:last_time_to_plot)), 'b')
 plot(smooth(min_clusterLikelihoods_norm), 'c')
 %scatter(whenRestarted, ones(length(whenRestarted),1), 'k')
 grid on 
-axis ([0 last_time_to_plot 0 1])
+axis ([0 (last_time_to_plot-1) 0 1])
 
 xlabel('time', 'FontSize',15, 'Interpreter','latex')
 ylabel('Abnormalities', 'FontSize',15, 'Interpreter','latex')
@@ -347,32 +376,32 @@ legend({'$\tilde{S}_t$ abn.', '$a_t abn.$', 'rec. abn', ...
 
 
 %%
-FigureGTOdometry = figure;
-FigureGTOdometry.Position = [0,0,1500, 300];
+% FigureGTOdometry = figure;
+% FigureGTOdometry.Position = [0,0,1500, 300];
 
 % GT
 % Anomaly defined by me
-area([(GT == 1)]    , 'FaceColor',[1 0.8 0.8],'EdgeColor',[1 0.8 0.8]);
-hold on
-area([(GT == 2)]    , 'FaceColor',[0.6 1 0.6],'EdgeColor',[0.6 1 0.6]);
-area([(GT == 3)]    , 'FaceColor',[0.6 1 1],'EdgeColor',[0.5 1 1]);
-%area([(GT == 5)]    , 'FaceColor',[1 0.7 1],'EdgeColor',[1 0.7 1]);
-scatter(whenRestarted, ones(length(whenRestarted),1)*0.35, 50, 'k', 'filled')
-xline(whenRestarted,'LineWidth',1,'LineStyle', ':','color','k')
-axis([0 size(GT, 2) 0 1])
-%set(gca,'xtick',[])
-%xlabel('time instant $t$','FontSize',11, 'Interpreter','latex')
-xlabel('time','FontSize',15, 'Interpreter','latex')
-%ylabel('$|z_{t+1|t}^v - z_{t+1}^v|$','FontSize',12, 'Interpreter','latex')
-%legend('$err_{a^v_t}$', '$err_{z^v_t}$','FontSize',9, 'Interpreter','latex')
-legend({'Pedestrian visible', 'Car restart', 'Oscillating motion', ...
-        'Particles restarts'},  ...
-        'FontSize',15, 'Interpreter','latex', 'Location', 'south', ...
-        'Orientation', 'horizontal')
-    
-ax = gca;
-resolution = 1200;
-% Requires R2020a or later
-exportgraphics(ax, ...
-    'C:\Users\asus\Documents\Datasets_and_results\Icab_SM_3\StartingPointsVsAnomalies.png', ...
-    'Resolution',resolution) 
+% area([(GT == 1)]    , 'FaceColor',[1 0.8 0.8],'EdgeColor',[1 0.8 0.8]);
+% hold on
+% area([(GT == 2)]    , 'FaceColor',[0.6 1 0.6],'EdgeColor',[0.6 1 0.6]);
+% area([(GT == 3)]    , 'FaceColor',[0.6 1 1],'EdgeColor',[0.5 1 1]);
+% %area([(GT == 5)]    , 'FaceColor',[1 0.7 1],'EdgeColor',[1 0.7 1]);
+% scatter(whenRestarted, ones(length(whenRestarted),1)*0.35, 50, 'k', 'filled')
+% xline(whenRestarted,'LineWidth',1,'LineStyle', ':','color','k')
+% axis([0 size(GT, 2) 0 1])
+% %set(gca,'xtick',[])
+% %xlabel('time instant $t$','FontSize',11, 'Interpreter','latex')
+% xlabel('time','FontSize',15, 'Interpreter','latex')
+% %ylabel('$|z_{t+1|t}^v - z_{t+1}^v|$','FontSize',12, 'Interpreter','latex')
+% %legend('$err_{a^v_t}$', '$err_{z^v_t}$','FontSize',9, 'Interpreter','latex')
+% legend({'Pedestrian visible', 'Car restart', 'Oscillating motion', ...
+%         'Particles restarts'},  ...
+%         'FontSize',15, 'Interpreter','latex', 'Location', 'south', ...
+%         'Orientation', 'horizontal')
+%     
+% ax = gca;
+% resolution = 1200;
+% % Requires R2020a or later
+% exportgraphics(ax, ...
+%     'C:\Users\asus\Documents\Datasets_and_results\Icab_SM_3\StartingPointsVsAnomalies.png', ...
+%     'Resolution',resolution) 
