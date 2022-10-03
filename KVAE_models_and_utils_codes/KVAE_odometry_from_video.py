@@ -462,19 +462,16 @@ class KVAE_odometry_from_video(nn.Module):
         dataMax = mat['dataMax']
         dataMax = dataMax.transpose()
         # Normalize pos
-        n_particles = odometry.shape[1]
-        denorm_particle = np.zeros(odometry.shape)
-        denorm_factor_pos = np.matlib.repmat(dataMax - dataMin, 1, n_particles)
-        denorm_particle[0:2, :] = np.divide((odometry[0:2,:] - dataMin), denorm_factor_pos)
+        norm_particle = np.zeros(odometry.shape)
+        norm_particle[0,:] = (odometry[0,:] - dataMin[0]) / (dataMax[0] - dataMin[0])
+        norm_particle[1,:] = (odometry[1,:] - dataMin[1]) / (dataMax[1] - dataMin[1])
         # Normalize vel
-        denorm_factor_vel_x = np.matlib.repmat(dataMax[0,0] - dataMin[0,0], 1, n_particles)
-        denorm_particle[2, :] = np.divide(odometry[2,:], denorm_factor_vel_x)
-        denorm_factor_vel_y = np.matlib.repmat(dataMax[1,0] - dataMin[1,0], 1, n_particles)
-        denorm_particle[3, :] = np.divide(odometry[3,:], denorm_factor_vel_y)
+        norm_particle[2,:] = odometry[2,:] / (dataMax[0] - dataMin[0])
+        norm_particle[3,:] = odometry[3,:] / (dataMax[1] - dataMin[1])
 
-        return denorm_particle
+        return norm_particle
 
-        # Denormalize particles
+    # Denormalize particles
     def DenormalizeParticles(self, odometry):
         # Load train pos min
         file_path = 'C:\\Users\\simob\\Desktop\\Old_training\\Old_training\\02\\train_positions\\train_positions_min'
@@ -486,19 +483,15 @@ class KVAE_odometry_from_video(nn.Module):
         mat = scipy.io.loadmat(file_path)
         dataMax = mat['dataMax']
         dataMax = dataMax.transpose()
-        # Normalize pos
-        n_particles = odometry.shape[1]
-        norm_particle = np.zeros(odometry.shape)
-        norm_factor_pos = np.matlib.repmat(dataMax - dataMin, 1, n_particles)
-        norm_particle[0:2, :] = np.multiply(odometry[0:2,:], norm_factor_pos)
-        norm_particle[0:2, :] = norm_particle[0:2, :] + dataMin
-        # Normalize vel
-        norm_factor_vel_x = np.matlib.repmat(dataMax[0,0] - dataMin[0,0], 1, n_particles)
-        norm_particle[2, :] = np.multiply(odometry[2,:], norm_factor_vel_x)
-        norm_factor_vel_y = np.matlib.repmat(dataMax[1,0] - dataMin[1,0], 1, n_particles)
-        norm_particle[3, :] = np.multiply(odometry[3,:], norm_factor_vel_y)
+        # Denormalize pos
+        denorm_particle = np.zeros(odometry.shape)
+        denorm_particle[0,:] = odometry[0,:] * (dataMax[0]-dataMin[0]) + dataMin[0]
+        denorm_particle[1,:] = odometry[1,:] * (dataMax[1]-dataMin[1]) + dataMin[1]
+        # Denormalize vel
+        denorm_particle[2,:] = odometry[2,:] * (dataMax[0]-dataMin[0])
+        denorm_particle[3,:] = odometry[3,:] * (dataMax[1]-dataMin[1])
 
-        return norm_particle
+        return denorm_particle
 
     # Function to calculate the odometry value using IMU
     def CalculateOdometryFromIMU(self, orientation, acceleration, current_odometry,index, current_velocity):
