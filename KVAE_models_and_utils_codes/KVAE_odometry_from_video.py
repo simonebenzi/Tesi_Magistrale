@@ -7,6 +7,8 @@ Created on Fri Apr 30 13:38:37 2021
 
 
 import numpy as np
+import numpy.matlib
+from sympy import difference_delta
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,8 +17,6 @@ import scipy.stats
 from torchvision.utils import save_image
 import unittest
 from navpy import quat2angle
-
-from prova import CalculateWeightForIMU
 
 #from ConfigurationFiles import Config_GPU as ConfigGPU 
 
@@ -160,6 +160,8 @@ class KVAE_odometry_from_video(nn.Module):
         self.whereRestarted = []        
         self.needReinit = False
         self.needReinitAfterItIsGoodAgain = False
+
+        self.IMUInstant = 0
 
         # IMU estimation
         if self.mjpf != None:
@@ -422,27 +424,107 @@ class KVAE_odometry_from_video(nn.Module):
         return
 
     ############################################################################
+         # Normalize single value
+    def DenormalizeValue(self, odometry):
+        # Load train pos min
+        file_path = 'C:\\Users\\simob\\Desktop\\Old_training\\Old_training\\02\\train_positions\\train_positions_min'
+        mat = scipy.io.loadmat(file_path)
+        dataMin = mat['dataMin']
+        dataMin = dataMin.transpose()
+        # Load train pos max
+        file_path = 'C:\\Users\\simob\\Desktop\\Old_training\\Old_training\\02\\train_positions\\train_positions_max'
+        mat = scipy.io.loadmat(file_path)
+        dataMax = mat['dataMax']
+        dataMax = dataMax.transpose()
+        # Normalize pos
+        norm_particle = np.zeros(odometry.shape)
+        norm_factor_pos = dataMax - dataMin
+        norm_particle[0:2] = np.multiply(odometry[0:2], norm_factor_pos)
+        norm_particle[0:2] = norm_particle[0:2] + dataMin
+        # Normalize vel
+        norm_factor_vel_x = dataMax[0,0] - dataMin[0,0]
+        norm_particle[2] = np.multiply(odometry[2], norm_factor_vel_x)
+        norm_factor_vel_y = dataMax[1,0] - dataMin[1,0]
+        norm_particle[3] = np.multiply(odometry[3], norm_factor_vel_y)
+
+        return norm_particle    
+
+       # Normalize particles
+    def NormalizeParticles(self, odometry):
+        # Load train pos min
+        file_path = 'C:\\Users\\simob\\Desktop\\Old_training\\Old_training\\02\\train_positions\\train_positions_min'
+        mat = scipy.io.loadmat(file_path)
+        dataMin = mat['dataMin']
+        dataMin = dataMin.transpose()
+        # Load train pos max
+        file_path = 'C:\\Users\\simob\\Desktop\\Old_training\\Old_training\\02\\train_positions\\train_positions_max'
+        mat = scipy.io.loadmat(file_path)
+        dataMax = mat['dataMax']
+        dataMax = dataMax.transpose()
+        # Normalize pos
+        n_particles = odometry.shape[1]
+        denorm_particle = np.zeros(odometry.shape)
+        denorm_factor_pos = np.matlib.repmat(dataMax - dataMin, 1, n_particles)
+        denorm_particle[0:2, :] = np.divide((odometry[0:2,:] - dataMin), denorm_factor_pos)
+        # Normalize vel
+        denorm_factor_vel_x = np.matlib.repmat(dataMax[0,0] - dataMin[0,0], 1, n_particles)
+        denorm_particle[2, :] = np.divide(odometry[2,:], denorm_factor_vel_x)
+        denorm_factor_vel_y = np.matlib.repmat(dataMax[1,0] - dataMin[1,0], 1, n_particles)
+        denorm_particle[3, :] = np.divide(odometry[3,:], denorm_factor_vel_y)
+
+        return denorm_particle
+
+        # Denormalize particles
+    def DenormalizeParticles(self, odometry):
+        # Load train pos min
+        file_path = 'C:\\Users\\simob\\Desktop\\Old_training\\Old_training\\02\\train_positions\\train_positions_min'
+        mat = scipy.io.loadmat(file_path)
+        dataMin = mat['dataMin']
+        dataMin = dataMin.transpose()
+        # Load train pos max
+        file_path = 'C:\\Users\\simob\\Desktop\\Old_training\\Old_training\\02\\train_positions\\train_positions_max'
+        mat = scipy.io.loadmat(file_path)
+        dataMax = mat['dataMax']
+        dataMax = dataMax.transpose()
+        # Normalize pos
+        n_particles = odometry.shape[1]
+        norm_particle = np.zeros(odometry.shape)
+        norm_factor_pos = np.matlib.repmat(dataMax - dataMin, 1, n_particles)
+        norm_particle[0:2, :] = np.multiply(odometry[0:2,:], norm_factor_pos)
+        norm_particle[0:2, :] = norm_particle[0:2, :] + dataMin
+        # Normalize vel
+        norm_factor_vel_x = np.matlib.repmat(dataMax[0,0] - dataMin[0,0], 1, n_particles)
+        norm_particle[2, :] = np.multiply(odometry[2,:], norm_factor_vel_x)
+        norm_factor_vel_y = np.matlib.repmat(dataMax[1,0] - dataMin[1,0], 1, n_particles)
+        norm_particle[3, :] = np.multiply(odometry[3,:], norm_factor_vel_y)
+
+        return norm_particle
 
     # Function to calculate the odometry value using IMU
-    def CalculateOdometryFromIMU(self, orientation, acceleration, current_odometry, initial_orientation, index):
+    def CalculateOdometryFromIMU(self, orientation, acceleration, current_odometry,index, current_velocity):
         add_acceleration = True
 
         orientation = np.asarray(orientation)
         acceleration = np.asarray(acceleration)
-        initial_orientation = np.asarray(initial_orientation)
-
+        # Initial orientation and initial velocity
+        initial_orientation = np.asarray(self.firstOrientationValue.clone())
+        firstOdometryValue_numpy = np.asarray(self.firstOdometryValue)
+        initial_vel = firstOdometryValue_numpy[2:,index]
         # Frame rate
         frame_rate = 30
 
-        # Initial position and initial velocity
-        initial_vel = self.firstOdometryValue[2:4,index]
         # From quaternions to rotations angles
         initial_yaw = quat2angle(initial_orientation[0,0], initial_orientation[0,1:4], output_unit='rad')[2]
         yaw = quat2angle(orientation[0,0], orientation[0,1:4], output_unit='rad')[2]
 
         # Current velocity
-        current_vel = current_odometry[2:4]
-        current_vel = np.asarray(current_vel)
+        # if self.timeInstant == 1:
+        #     current_vel = current_odometry[2:4]
+        # else:
+        #     current_vel = np.transpose(current_params)[2:4,0]
+        # current_vel = np.asarray(current_vel)
+        current_vel = np.asarray(current_velocity)
+
         # Current position
         current_pos = current_odometry[0:2]
         current_pos = np.asarray(current_pos)
@@ -454,15 +536,15 @@ class KVAE_odometry_from_video(nn.Module):
         next_odometry = np.zeros((4,1))
 
         # Angle between current and initial velocity
-        a_3d = np.append(current_vel[:], [0])
-        b_3d = np.append(initial_vel[:], [0])
+        a_3d = np.append(current_vel, [0])
+        b_3d = np.append(initial_vel, [0])
         c = np.cross(a_3d, b_3d)
         c = np.asarray(c)
 
         if c[2] < 0:
-            theta = -np.arctan2(np.linalg.norm(c),np.dot(current_vel[:],initial_vel[:]))
+            theta = -np.arctan2(np.linalg.norm(c),np.dot(current_vel,initial_vel))
         else:
-            theta = np.arctan2(np.linalg.norm(c),np.dot(current_vel[:],initial_vel[:]))
+            theta = np.arctan2(np.linalg.norm(c),np.dot(current_vel,initial_vel))
         
         beta_i = theta
 
@@ -475,7 +557,7 @@ class KVAE_odometry_from_video(nn.Module):
         R = np.asarray(R)
 
             #Calculate next velocity, next acceleration on xy and next position
-        next_vel_without_acc = np.matmul(R, current_vel[:].transpose())
+        next_vel_without_acc = np.matmul(R, current_vel.transpose())
         next_vel_without_acc = next_vel_without_acc.transpose()
 
         if add_acceleration:
@@ -501,7 +583,7 @@ class KVAE_odometry_from_video(nn.Module):
         next_pos = next_pos.transpose()
 
         # Define next odometry vector
-        next_odometry[:] = np.concatenate((next_pos,next_vel))[:]
+        next_odometry = np.concatenate((next_pos,next_vel))
 
         return next_odometry
 
@@ -593,7 +675,7 @@ class KVAE_odometry_from_video(nn.Module):
             # D) Initialize also odometry with same cluster assignments of video and with the
             #    GIVEN ODOMETRY
             self.mjpf.InitializeParticlesBasedOnGivenClusterAssignments(self.mjpf_video.clusterAssignments)
-            self.mjpf.InitializeParticlesMeanGivenSingleValue(currentParamsBatch, self.mjpf.nodesCov[0,:,:]/1000)                
+            self.mjpf.InitializeParticlesMeanGivenSingleValue(currentParamsBatch, self.mjpf.nodesCov[0,:,:]/1000)               
         #######################################################################
         # 3) ------ VIDEO UPDATE
         # A) Particles likelihoods, given the cluster to which they belong
@@ -650,7 +732,7 @@ class KVAE_odometry_from_video(nn.Module):
             anomalyVectorCurrentTimeInstant.append(torch.min(anomalies_video).item())
             anomalyVectorCurrentTimeInstant.append(imageReconstructionAnomalies.item())
             anomalyVectorCurrentTimeInstant.append(torch.min(particlesLikelihoodGivenCluster).item())
-            diffsPreds = torch.linalg.norm(self.updatedValuesFromDMatrices - self.mjpf.particlesMeansPredicted, dim = 1)
+            diffsPreds = torch.linalg.norm(self.updatedValuesFromDMatrices - self.mjpf.particlesMeansPredicted, dim = 0)
             mean_diffsPreds = torch.mean(torch.mean(diffsPreds)).item()
             anomalyVectorCurrentTimeInstant.append(mean_diffsPreds)
             self.anomalyVectorCurrentTimeInstant = np.asarray(anomalyVectorCurrentTimeInstant)
@@ -800,7 +882,10 @@ class KVAE_odometry_from_video(nn.Module):
             self.mjpf.InitializeParticlesBasedOnGivenClusterAssignments(self.mjpf_video.clusterAssignments)
             self.mjpf.InitializeParticlesMeanGivenSingleValue(currentParamsBatch, self.mjpf.nodesCov[0,:,:]/1000)      
             # E) Initialize the first orientation value to calculate predictions with IMU
-            self.firstOrientationValue = currentOrientBatch        
+            self.firstOrientationValue = currentOrientBatch.clone() 
+            firstOdometry = self.mjpf.particlesMeansUpdated.clone()  
+            self.firstOdometryValue = self.DenormalizeParticles(firstOdometry)
+            self.previousPosition = self.DenormalizeValue(np.transpose(currentParamsBatch.clone()))
         #######################################################################
         # 3) ------ VIDEO UPDATE
         # A) Particles likelihoods, given the cluster to which they belong
@@ -820,26 +905,39 @@ class KVAE_odometry_from_video(nn.Module):
             # prediction through matrices D and E.
             if self.timeInstant == 1:
                 # First odometry value to calculate predictions with IMU
-                self.firstOdometryValue = self.mjpf.particlesMeansPredicted.clone()  
+                currentParamsDenorm = self.DenormalizeParticles(np.transpose(currentParamsBatch.clone()))
+                current_vel = (currentParamsDenorm - self.previousPosition)[0:2,0]
+                self.previousPosition = currentParamsDenorm
                 for j in range(self.firstOdometryValue.shape[1]):
                     current_odometry = self.firstOdometryValue[:,j]
-                    self.estimatedOdometryFromIMU[:,j] = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, current_odometry, self.firstOrientationValue,j)[:,0]
+                    self.estimatedOdometryFromIMU[:,j] = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, current_odometry, j, current_vel)[:,0]
             elif self.timeInstant != 0:
-                for j in range(self.mjpf.particlesMeansUpdated.clone().shape[1]):
-                    current_odometry = (self.mjpf.particlesMeansUpdated.clone())[:,j]
-                    self.estimatedOdometryFromIMU[:,j] = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, current_odometry , self.firstOrientationValue,j)[:,0]
+                # currentGT = torch.transpose(currentParamsBatch, 0, 1)
+                # currentGT = currentGT.repeat(1, self.mjpf.numberOfParticles)
+                # currentOdometryParticles = self.DenormalizeParticle(currentGT)
+                currentOdometryParticles = self.DenormalizeParticles(self.mjpf.particlesMeansUpdated.clone())
+                currentParamsDenorm = self.DenormalizeParticles(np.transpose(currentParamsBatch.clone()))
+                current_vel = (currentParamsDenorm - self.previousPosition)[0:2,0]
+                self.previousPosition = currentParamsDenorm
+                for j in range(self.mjpf.numberOfParticles):
+                    current_odometry = currentOdometryParticles[:,j]
+                    self.estimatedOdometryFromIMU[:,j] = self.CalculateOdometryFromIMU(currentOrientBatch, currentAccBatch, current_odometry , j, current_vel)[:,0]
             
+            self.estimatedOdometryFromIMU = self.NormalizeParticles(self.estimatedOdometryFromIMU)
             self.mjpf.UpdateParticlesMeansAndCovariancesGivenDifferentObservedStatesAndDifferentObservationCovariancesSingleMJPF(
-                    self.updatedValuesFromDMatrices.clone(), self.clusterGraphVideo.nodesCovD)
+                self.updatedValuesFromDMatrices.clone(), self.clusterGraphVideo.nodesCovD)
 
         # Saving the updated odometry value before resampling
-        self.updatedOdometryValuesBeforeResampling = self.mjpf.particlesMeansUpdated.clone() # 4x150 - 150 particelle
+        self.mjpf.particlesMeansUpdated[2:4,:] = self.mjpf.differenceOfMeansBetweenUpdates.clone()[0:2,:]
+        self.updatedOdometryValuesBeforeResampling = self.mjpf.particlesMeansUpdated.clone() # 4x50 - 50 particelle
         #######################################################################
         # Calculate KLDA
         if self.timeInstant > 0:
-            KLDA  = self.mjpf.CalculateOverallKLDA(self.alpha_from_video_plus_sequencing)
+            # KLDA  = self.mjpf.CalculateOverallKLDA(self.alpha_from_video_plus_sequencing)
+            KLDA  = self.mjpf.CalculateKLDAForEachParticle(self.alpha_from_video_plus_sequencing)
         else:
-            KLDA  = torch.zeros(1)
+            # KLDA  = torch.zeros(1)
+            KLDA  = torch.zeros(self.mjpf.numberOfParticles)
         #######################################################################
         # 5) ------ VIDEO REWEIGHTING
         # A) Perform reweighting of particles based on alpha
@@ -863,12 +961,14 @@ class KVAE_odometry_from_video(nn.Module):
             self.HandleAnomalyWindowingAfterRestart()  
         if self.timeAfterReinit > 0:
             anomalyVectorCurrentTimeInstant = []
-            anomalyVectorCurrentTimeInstant.append(KLDA.item())
+            # anomalyVectorCurrentTimeInstant.append(KLDA.item())
+            anomalyVectorCurrentTimeInstant.append(torch.min(KLDA).item())
             anomalyVectorCurrentTimeInstant.append(torch.min(anomalies_video).item())
             anomalyVectorCurrentTimeInstant.append(imageReconstructionAnomalies.item())
             anomalyVectorCurrentTimeInstant.append(torch.min(particlesLikelihoodGivenCluster).item())
-            diffsPreds = torch.linalg.norm(self.updatedValuesFromDMatrices - self.mjpf.particlesMeansPredicted, dim = 1)
+            diffsPreds = torch.linalg.norm(self.updatedValuesFromDMatrices - self.mjpf.particlesMeansPredicted, dim = 0)
             mean_diffsPreds = torch.mean(torch.mean(diffsPreds)).item()
+            print(mean_diffsPreds)
             anomalyVectorCurrentTimeInstant.append(mean_diffsPreds)
             self.anomalyVectorCurrentTimeInstant = np.asarray(anomalyVectorCurrentTimeInstant)
         else:
@@ -878,7 +978,7 @@ class KVAE_odometry_from_video(nn.Module):
 
         #######################################################################
         # 7) ------ IMU UPDATE
-        # Find the weight for the IMU 
+        # Find the weight related to video for each particle
         if self.timeInstant > 0:
             weights = []
             for i in range(self.anomaliesMeans.shape[0]):
@@ -887,17 +987,47 @@ class KVAE_odometry_from_video(nn.Module):
                 current_anomaly = self.anomalyVectorCurrentTimeInstant[i]
                 weight = self.CalculateWeightForIMU(mean, std, current_anomaly)
                 weights.append(weight)
+            # weights_all_anomalies = torch.zeros(self.numberOfAnomalies, self.mjpf.numberOfParticles)
+            # mean = torch.zeros(self.numberOfAnomalies,1)
+            # std = torch.zeros(self.numberOfAnomalies,1)
+            # for j in range(self.numberOfAnomalies):
+            #     mean[j] = self.anomaliesMeans[j]
+            #     std[j] = self.anomaliesStandardDeviations[j]
 
+            # for i in range(self.mjpf.numberOfParticles):
+            #     weights_all_anomalies[0,i] = self.CalculateWeightForIMU(mean[0].item(), std[0].item(), KLDA[i].item())
+            #     weights_all_anomalies[1,i] = self.CalculateWeightForIMU(mean[1].item(), std[1].item(), anomalies_video[i].item())
+            #     weights_all_anomalies[2,i] = self.CalculateWeightForIMU(mean[2].item(), std[2].item(), imageReconstructionAnomalies.item())
+            #     weights_all_anomalies[3,i] = self.CalculateWeightForIMU(mean[3].item(), std[3].item(), particlesLikelihoodGivenCluster[i].item())
+            #     weights_all_anomalies[4,i] = self.CalculateWeightForIMU(mean[4].item(), std[4].item(), diffsPreds[i].item())
+
+            # weights = torch.mean(weights_all_anomalies, 0)
+            # print(weights.shape)
+            # # self.weights_mat = np.matlib.repmat(weights, 4, 1)
+            # self.weights_mat = weights.repeat(4, 1)
 
             print('IMU weights: {}'.format(weights))
-            weight_IMU = np.mean(weights)
-            print(weight_IMU)
+            weights = np.asarray(weights)
+            min_indexes = np.argsort(weights)[:4]
+            self.weight_IMU = np.mean(weights[min_indexes])
+            print(self.weight_IMU)
         
-            # Compute odometry update with IMU prediction
+            # if self.timeInstant > 1539 and self.timeInstant < 1800:
+            #     self.weight_IMU = 0
+            #     print('Weight = 0')
+            # else: 
+            #     self.weight_IMU = 1
+
+            # Compute odometry update with a weighted mean between IMU prediction and video prediction
+            # self.updateWithIMU  = \
+            #     torch.mul(self.updatedOdometryValuesBeforeResampling.clone(), self.weights_mat.clone()) +\
+            #         torch.mul(torch.from_numpy(self.estimatedOdometryFromIMU), (1 - self.weights_mat.clone()))
             self.updateWithIMU  = \
-                (self.updatedOdometryValuesBeforeResampling * weight_IMU) + (self.estimatedOdometryFromIMU * (1 - weight_IMU))
-            self.updatedOdometryValuesBeforeResampling = self.updateWithIMU
-            self.mjpf.particlesMeansUpdated = self.updateWithIMU
+                self.updatedOdometryValuesBeforeResampling.clone() * self.weight_IMU +\
+                self.estimatedOdometryFromIMU * (1 - self.weight_IMU)
+
+            self.updatedOdometryValuesBeforeResampling = self.updateWithIMU.clone()
+            self.mjpf.particlesMeansUpdated = self.updateWithIMU.clone()
         
         #######################################################################
         # 8) ------ HANDLING ANOMALY WINDOWS
@@ -915,7 +1045,7 @@ class KVAE_odometry_from_video(nn.Module):
                 #self.CheckIfParticlesRestartingIsNecessary(sumsOverAnomalyWindows)    
 
         #######################################################################
-        # 8) ------ RESAMPLING AND RESTARTING         
+        # 9) ------ RESAMPLING AND RESTARTING         
         resamplingNecessary = self.mjpf_video.CheckIfResamplingIsNecessary()        
         # If resampling is necessary
         if resamplingNecessary or self.needReinit: # also resample when reinitialization is requested            
@@ -990,7 +1120,7 @@ class KVAE_odometry_from_video(nn.Module):
         gaussian_distribution = scipy.stats.norm(anomaliesMean, anomaliesStd).pdf(x)
         minValue = np.min(gaussian_distribution)
         maxValue = np.max(gaussian_distribution)
-        normalized_weight = (weight - minValue) / (maxValue - minValue)
+        normalized_weight = np.absolute((weight - minValue) / (maxValue - minValue))
 
         return normalized_weight
     

@@ -8,11 +8,11 @@ clear
 addpath('./MATLAB_paths');
 paths = DefineCodeAndDataPaths();
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Load IMU
-load('C:\Users\simob\Desktop\Old_training\Old_training\02\test_IMU\linearAcceleration.mat')
-load('C:\Users\simob\Desktop\Old_training\Old_training\02\test_IMU\orientation.mat')
-acc_bias = mean(linearAcceleration(1:100,:));
-linearAcceleration = linearAcceleration - acc_bias;% - [0.05, 0];
+% % Load IMU
+% load('C:\Users\simob\Desktop\Old_training\Old_training\02\test_IMU\linearAcceleration.mat')
+% load('C:\Users\simob\Desktop\Old_training\Old_training\02\test_IMU\orientation.mat')
+% acc_bias = mean(linearAcceleration(1:100,:));
+% linearAcceleration = linearAcceleration - acc_bias;% - [0.05, 0];
 %% Other necessary code
 AddAdditionalNecessaryPaths()
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -21,8 +21,8 @@ AddAdditionalNecessaryPaths()
 T = 100; % Starting point for debug
 endingPoint = -1;
 last_time_to_plot = 1999;
-linearAcceleration = linearAcceleration(1:last_time_to_plot,:);
-orientationSynch = orientationSynch(1:last_time_to_plot,:);
+% linearAcceleration = linearAcceleration(1:last_time_to_plot,:);
+% orientationSynch = orientationSynch(1:last_time_to_plot,:);
 final_to_print = last_time_to_plot;
 dataCase = 2; % train (0), validation (1) or test (2)
 timeStepsBeforeEndForErrCalculation = 10;
@@ -97,19 +97,19 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% PLOTTING
 % tracking
-initial_velocity = predParamsCorrectedUpdatedOdometry_o(T,:,:) - predParamsCorrectedUpdatedOdometry_o(T-1,:,:);
-IMU_odometry = [];
-for i = T:last_time_to_plot
-    if i == T
-        current_vel = initial_velocity;
-    else
-        current_vel = predParamsCorrectedUpdatedOdometry_o(i,:,:) - predParamsCorrectedUpdatedOdometry_o(i-1,:,:);
-    end
-    new_odometry = CalculateOdometryFromIMU(orientationSynch(i,:), linearAcceleration(i,:), ...
-        predParamsCorrectedUpdatedOdometry_o(i,:,:), orientationSynch(T,:), initial_velocity, current_vel);
-    IMU_odometry = [IMU_odometry, new_odometry(:,1)];
-
-end
+% initial_velocity = predParamsCorrectedUpdatedOdometry_o(T,:,:) - predParamsCorrectedUpdatedOdometry_o(T-1,:,:);
+% IMU_odometry = [];
+% for i = T:last_time_to_plot
+%     if i == T
+%         current_vel = initial_velocity;
+%     else
+%         current_vel = predParamsCorrectedUpdatedOdometry_o(i,:,:) - predParamsCorrectedUpdatedOdometry_o(i-1,:,:);
+%     end
+%     new_odometry = CalculateOdometryFromIMU(orientationSynch(i,:), linearAcceleration(i,:), ...
+%         predParamsCorrectedUpdatedOdometry_o(i,:,:), orientationSynch(T,:), initial_velocity, current_vel);
+%     IMU_odometry = [IMU_odometry, new_odometry(:,1)];
+% 
+% end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 minX = min(realParams(:,1));
 maxX = max(realParams(:,1));
@@ -215,6 +215,7 @@ exportgraphics(ax,fullfile(paths.baseFolderPath, 'Plot_tracking_result.png'),'Re
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % errors
+load('C:\Users\simob\Desktop\Old_training\Old_training\02\Tracking_results\mean_distances_od_IMU')
 
 mean_value = mean([mean_distances_v; mean_distances_od]);
 std_value  = std([mean_distances_v; mean_distances_od]);
@@ -243,6 +244,34 @@ legend({'Pedestrian visible', 'Car restart','Oscillating motion', ...
 ax = gca;
 % Requires R2020a or later
 exportgraphics(ax,'Plot_errors.png','Resolution',800) 
+
+compareErrorsFigure = figure
+compareErrorsFigure.Position = [0,0,1350, 300]
+subplot(2,1,1)
+hold on
+plot(mean_distances_od_IMU(1:last_time_to_plot), 'g')
+plot(mean_distances_od(1:last_time_to_plot), 'r')
+grid on 
+axis ([0 last_time_to_plot 0 (mean_value+4*std_value)])
+
+xlabel('time', 'FontSize',15, 'Interpreter','latex')
+ylabel('Errors (m)', 'FontSize',15, 'Interpreter','latex')
+
+legend({'Errors from IMU', ...
+    'Errors from video'},  ...
+    'FontSize',15, 'Interpreter','latex', ...
+    'Location', 'north', ...
+    'Orientation', 'horizontal')
+
+ax = gca;
+% Requires R2020a or later
+exportgraphics(ax,'Plot_errors.png','Resolution',800) 
+hold off
+
+load('C:\Users\simob\Desktop\Old_training\Old_training\02\Tracking_results\OD_IMU_weight_debugCode110')
+subplot(2,1,2)
+plot(IMU_weight(1:last_time_to_plot-1), 'r')
+title('Weights')
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % anomalies

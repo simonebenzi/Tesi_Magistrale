@@ -481,6 +481,10 @@ class DataHolder(object):
         print(self.odometry.shape[2])
         print('Parameters size')
         print(self.params.shape[2])
+        # print('Acceleration size')
+        # print(self.acceleration.shape[2])
+        # print('Orientation size')
+        # print(self.orientation.shape[2])
         
         return
     

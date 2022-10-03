@@ -5,6 +5,7 @@ Created on Tue Nov  2 13:42:05 2021
 @author: giulia.slavic
 """
 
+from fileinput import filename
 import numpy as np
 import torch
 import copy
@@ -246,6 +247,7 @@ def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData, use_IMU):
         predicted_params_min_all = []
         clusterAssignments_numpy_all = []
         anomalies_odometry_numpy_all = []
+        weight_numpy_all = []
         anomalies_hybrid_numpy_all = []
         allPredictedParams_numpy_all = []
         clusterAssignments_od_numpy_all = []
@@ -376,6 +378,11 @@ def RunCombinedMJPF(config, configOfV, case, kvaeOfV, testingData, use_IMU):
                 
                 SaveOutputToMATLABGivenDebugCode(kvaeOfV.anomalies_odometry.clone(), anomalies_odometry_numpy_all, 
                                                  configOfV['output_folder'], 'anomalies_odometry', case)
+
+                if kvaeOfV.timeInstant >= 2 and use_IMU:
+                    weight_IMU = np.asarray(kvaeOfV.weight_IMU)
+                    SaveOutputToMATLABGivenDebugCode(weight_IMU, weight_numpy_all, 
+                                                    configOfV['output_folder'], 'IMU_weight', case)
 
                 #print(kvaeOfV.timeInstant)
                 #if kvaeOfV.timeInstant > 1:

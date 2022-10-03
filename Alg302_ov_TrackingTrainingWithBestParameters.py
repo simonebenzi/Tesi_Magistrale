@@ -33,4 +33,4 @@ kvaeOfV, transitionMatNumpy, transMatsTimeNumpy, nodesDistanceMatrixNumpy, \
 ###############################################################################
 # MAIN LOOP
 trackingCase = 110
-kvaeOfV = Combined_MJPFs_running_functions.RunCombinedMJPF(configKVAE, configCombinedMJPFs, trackingCase, kvaeOfV, testingData)
+kvaeOfV = Combined_MJPFs_running_functions.RunCombinedMJPF(configKVAE, configCombinedMJPFs, trackingCase, kvaeOfV, testingData, False)
